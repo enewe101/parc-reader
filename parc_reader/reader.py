@@ -67,6 +67,7 @@ class ParcCorenlpReader(object):
 
 		sentence_pointer = 0
 		last_excess = 0
+		paragraph_idx = -1
 		for collapsed_paragraph in collapsed_paragraph_texts:
 
 			# We begin by assuming the paragraph consists of one sentence
@@ -120,33 +121,51 @@ class ParcCorenlpReader(object):
 
 			# Now put the correct number of sentences into the paragraph,
 			# and store this paragraph in the article object's global list
-			this_paragraph = self.sentences[
+			paragraph_idx += 1
+			this_paragraph = []
+			add_sentences = self.sentences[
 				sentence_pointer : sentence_pointer + best_num_sentences
 			]
-
-			#if (
-			#	closest_length - target_length > 12 
-			#	or closest_length - target_length < 0
-			#):
-			print closest_length - target_length
-			print '---'
-			print len(collapsed_paragraph)
-			print collapsed_paragraph
-			print '---'
-			print closest_length
-			print ''.join([
-				''.join([t['word'] for t in sentence['tokens']])
-				for sentence in this_paragraph
-			])
-			print '\n'
-			#	raise AlignmentError
-
+			for sentence in add_sentences:
+				sentence['paragraph_idx'] = paragraph_idx
+				this_paragraph.append(sentence)
 			self.paragraphs.append(this_paragraph)
 
 			# Advance the sentence pointer according to how many sentences
 			# were aligned to the last paragraph
 			sentence_pointer += best_num_sentences
+
+			# If the paragraph we built was too big, it may be because
+			# PARC glues multiple paragraphs together (because the 
+			# "paragraphs" in the original are just sentence fragments and
+			# we won't split paragraphs within sentence fragments).
+			# Keep track of this so that we can skip these fragmentary 
+			# "paragraphs" as needed.
 			last_excess = closest_length - target_length
+
+			#if (
+			#	closest_length - target_length > 12 
+			#	or closest_length - target_length < 0
+			#):
+			#print closest_length - target_length
+			#print '---'
+			#print len(collapsed_paragraph)
+			#print collapsed_paragraph
+			#print '---'
+			#print closest_length
+			#print ''.join([
+			#	''.join([t['word'] for t in sentence['tokens']])
+			#	for sentence in this_paragraph
+			#])
+			#print '\n'
+			#	raise AlignmentError
+
+
+		# If there's sentences left over, add them to the last paragraph
+		additional_sentences = self.sentences[sentence_pointer:]
+		for sentence in additional_sentences:
+			this_paragraph.append(sentence)
+			sentence['paragraph_idx'] = paragraph_idx
 
 
 	def get_collapsed_length(self, sentence_num):
