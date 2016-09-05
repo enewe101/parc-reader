@@ -60,9 +60,8 @@ CoreNLP annotation of a PARC article.  In this way, the
 feels just like a ``CorenlpAnnotatedText`` that has been augmented with
 PARC annotations.
 
-Before continuing, be familiar with the `API 
+Before continuing, be familiar with the `API for ``CorenlpAnnotatedText`` objects
 <https://github.com/enewe101/corenlp-xml-reader.git>`_
-for ``CorenlpAnnotatedText``  objects`, all of which 
-is satisfied by the ``ParcCorenlpReader``.
+, all of which is satisfied by the ``ParcCorenlpReader``.
 
 
