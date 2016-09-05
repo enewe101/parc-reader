@@ -1,6 +1,6 @@
-from t4k import IncrementingMap as IncMap, rangify
+from parc_reader.utils import IncrementingMap as IncMap, rangify
 from bs4 import BeautifulSoup as Soup
-from corenlp_xml_reader.annotated_text import 
+from corenlp_xml_reader.annotated_text import (
 	AnnotatedText as CorenlpAnnotatedText
 )
 from itertools import izip_longest
