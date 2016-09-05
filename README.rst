@@ -3,7 +3,7 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Corenlp-xml-reader documentation
+Parc-reader documentation
 ================================
 
 .. py:module:: corenlp_xml_reader
@@ -38,8 +38,8 @@ Hackable install:
    python setup.py develop
 
 
-ParcCorenlpReader vs. ParcAnnotatedText
----------------------------------------
+``ParcCorenlpReader`` vs. ``ParcAnnotatedText``
+-----------------------------------------------
 
 If you just want to work with PARC3 files (and you don't have parallel
 CoreNLP annotations), then you will want to use the ``ParcAnnotatedText``
@@ -53,14 +53,16 @@ want to use ``ParcCorenlpReader``.
 ``ParcCorenlpReader`` Examples
 ------------------------------
 
-Instances of ``ParcCorenlpReader`` monkey-patche contents of the 
+Instances of ``ParcCorenlpReader`` monkey-patch contents of the 
 corresponding ``CorenlpAnnotatedText`` object built from the parallel
 CoreNLP annotation of a PARC article.  In this way, the 
 ``ParcCorenlpReader`` inserts information from the PARC annotations and
 feels just like a ``CorenlpAnnotatedText`` that has been augmented with
 PARC annotations.
 
-Before continuing, be familiar with the `API for ``CorenlpAnnotatedText`` <https://github.com/enewe101/corenlp-xml-reader.git> objects`, all of which 
+Before continuing, be familiar with the `API 
+<https://github.com/enewe101/corenlp-xml-reader.git>`_
+for ``CorenlpAnnotatedText``  objects`, all of which 
 is satisfied by the ``ParcCorenlpReader``.
 
 
