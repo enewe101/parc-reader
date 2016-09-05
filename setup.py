@@ -1,7 +1,7 @@
 '''
-Setup for the corenlp-xml-reader, a utility for reading CoreNLP annotation
-xml files into a Python AnnotatedArticle type, designed to make working with
-CoreNLP-annotated text easy in Python.
+Setup for the parc-reader, a utility for reading the PARC3 dataset and
+parallel CoreNLP annotations, designed to make working with the PARC3 
+dataset easy in Python.
 '''
 
 # Always prefer setuptools over distutils
@@ -29,7 +29,7 @@ setup(
     long_description=long_description,
 
     # The project's main homepage.
-    url='https://github.com/enewe101/corenlp-xml-reader',
+    url='https://github.com/enewe101/parc-reader',
 
     # Author details
     author='Edward Newell',
@@ -60,18 +60,18 @@ setup(
     # What does your project relate to?
     keywords= (
 		'NLP natrual language processing computational linguistics '
-		'CoreNLP Stanford parser'
+		'Penn Attribution Relation Corpus PARC PARC3'
 	),
 
     # You can just specify the packages manually here if your project is
     # simple. Or you can use find_packages().
-    packages=['corenlp_xml_reader'],
+    packages=['parc_reader'],
 	#indlude_package_data=True,
 	package_data={'': [
 		'README.md',
-		'data/AIDA/*',
-		'data/CoreNLP/*',
-		'data/raw-text/*',
+		'data/example-raw.txt',
+		'data/example-parc.xml',
+		'data/example-corenlp.xml',
 	]},
-	install_requires=['bs4']
+	install_requires=['bs4', 'corenlp-xml-reader']
 )
