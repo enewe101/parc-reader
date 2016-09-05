@@ -104,8 +104,9 @@ in too.
     1
 
 Sentences accessed this way (or by indexing into the ``article.sentences``
-list) have all of the usual features that they do in the corenlp_xml_reader,
-plus ``attributions``.  A sentence's attributions property is a dictionary
+list) have all of the usual features that they do in the 
+``corenlp_xml_reader``, plus ``attributions``.  A sentence's attributions 
+property is a dictionary
 of attribution objects, with the keys being the PARC3 attribution
 relation ids.  Let's have a look at the second sentence of the second 
 paragraph, which has an attribution in it:
@@ -131,10 +132,14 @@ Attributions have as properties an ``'id'``, as well as ``'source'``,
     wsj_0018_PDTB_annotation_level.xml_set_0
 
 The text spans in attributions are just lists of tokens -- the same kind
-of token as is found in corenlp_xml_reader.  Notice, however, that 
-tokens know if they are in an attribution, and they know what role (which
-span) they are part of, and retain a reference back to the attribution 
-itself.
+of token as is found in ``corenlp_xml_reader``.  Be warned that, while
+every attribution is guaranteed to have a non-empty ``'cue'``, the 
+``'source'`` is sometimes empty.  One additional feature that tokens have,
+beyond those of ``corenlp_xml_reader`` is that they know if they are in an 
+attribution, and they know what role (which span) they are part of, and 
+retain a reference back to the attribution itself.  So it is possible 
+both to get all the tokens in a given attribution span, as well as to check
+if a given token is part of an attribution.
 
 .. code-block:: python
 
@@ -161,7 +166,7 @@ all attributions in the file.
 
     >>> len(article.attributions)
     18
-    >>> print article.attributions.keys()
+    >>> print '\n'.join(article.attributions.keys())
     wsj_0018_PDTB_annotation_level.xml_set_5
     wsj_0018_Attribution_relation_level.xml_set_3
     wsj_0018_PDTB_annotation_level.xml_set_7
@@ -180,3 +185,4 @@ all attributions in the file.
     wsj_0018_PDTB_annotation_level.xml_set_1
     wsj_0018_Attribution_relation_level.xml_set_9
     wsj_0018_Attribution_relation_level.xml_set_7
+
