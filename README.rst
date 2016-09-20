@@ -98,8 +98,7 @@ in too.
     >>> print ' '.join([
     ...     token['word'] for token in first_sent_second_para['tokens']
     ... ])
-    Not only is development of the new company 's initial machine tied 
-    directly to Mr. Cray , so is its balance sheet .
+    Not only is development of the new company 's initial machine tied directly to Mr. Cray , so is its balance sheet .
     >>> first_sent_second_para['paragraph_idx']
     1
 

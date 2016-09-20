@@ -50,6 +50,111 @@ class ParcCorenlpReader(object):
 			self.delineate_paragraphs()
 
 
+	def get_attribution_html(self, attribution):
+		'''
+		given an attribution, write out the sentence as text, with the
+		attribution highlighted in color
+		'''
+
+		# Keep this attribution's id
+		attribution_id = attribution['id']
+
+		# Find out what the head of the cue span is -- we want to give
+		# it it's own styling
+		try:
+			cue_head = self._find_head(attribution['cue'])[0]
+		except IndexError:
+			cue_head = None
+
+		# Find out what the head of the source span is -- we want to give
+		# it it's own styling
+		try:
+			source_head = self._find_head(attribution['source'])[0]
+		except IndexError:
+			source_head = None
+
+		# first, get the sentence(s) involved in the attribution
+		# (and their tokens)
+		all_span_tokens = (
+			attribution['cue'] + attribution['source'] 
+			+ attribution['content'])
+		sentence_ids = [t['sentence_id'] for t in all_span_tokens]
+		sentences = self.sentences[min(sentence_ids) : max(sentence_ids)+1]
+		tokens = []
+		for sentence in sentences:
+			tokens += sentence['tokens']
+
+		words = ''
+		previous_role = None
+		for token in tokens:
+
+			# If the token is part of the target attribution, 
+			# Resolve the current token's role
+			role = None
+			if token['attribution'] is not None:
+				if token['attribution']['id'] == attribution_id:
+					role = token['role']
+
+			# If we have a change in role, close the old role (if any)
+			# and open the new one (if any)
+			if previous_role != role:
+
+				# Close the old role, if any
+				if previous_role is not None:
+					this_word = '</span> '
+				else:
+					this_word = ' '
+
+				# Open the new role, if any
+				if role is not None:
+					this_word = this_word + '<span class="%s">' % role
+
+			else:
+				this_word = ' '
+
+			# Finally add this token's word itself
+			# If the token is the head of the cue phrase, style accordingly
+			if token is cue_head:
+				this_word = (
+					this_word + '<span class="token cue-head">' +
+					token['word'] 
+					+ '<span class="pos"><span class="pos-inner">'
+					+ token['pos'] + '</span></span>'
+					+ '</span>'
+				)
+
+			elif token is source_head:
+				this_word = (
+					this_word + '<span class="token source-head">' +
+					token['word'] 
+					+ '<span class="pos"><span class="pos-inner">'
+					+ token['pos'] + '</span></span>' 
+					+ '</span>'
+				)
+
+			else:
+				this_word = (
+					this_word 
+					+ '<span class="token">'
+					+ token['word']
+					+ '<span class="pos"><span class="pos-inner">'
+					+ token['pos'] + '</span></span>'
+					+ '</span>'
+				)
+
+			# Add this word on to the words collected so far.
+			words += this_word
+
+			# Update the previous role
+			previous_role = role
+
+		# We have finished the sentences.  Close the last role if any.
+		if previous_role is not None:
+			words += '</span>'
+
+		return words
+
+
 	def delineate_paragraphs(self):
 
 		# A paragraph is just an array of CorenlpSentence objects
@@ -166,6 +271,53 @@ class ParcCorenlpReader(object):
 		for sentence in additional_sentences:
 			this_paragraph.append(sentence)
 			sentence['paragraph_idx'] = paragraph_idx
+
+
+	def _find_head(self, tokens):
+
+		heads = []
+
+		# If there is only one token, that's the head
+		if len(tokens) ==  1:
+			heads = [tokens[0]]
+
+		else:
+
+			# otherwise iterate over all the tokens to find the head
+			for token in tokens:
+
+				# if this token has no parents or children its not part
+				# of the dependency tree (it's a preposition, e.g.)
+				if 'parents' not in token and 'children' not in token:
+					continue
+
+				# if this token has any parents that among the tokens list
+				# it's not the head!
+				try:
+
+					token_ids = [
+						(t['sentence_id'], t['id']) for t in tokens
+					]
+
+					has_parent_in_span = any([
+						(t[1]['sentence_id'], t[1]['id'])
+						in token_ids for t in token['parents']
+					])
+
+					if has_parent_in_span:
+						relations_to_parents = [
+							t for t in token['parents'] if t[1] in tokens
+						]
+						continue
+				except KeyError:
+					pass
+
+				# otherwise it is the head
+				else:
+					heads.append(token)
+
+		# NOTE: head may be none
+		return heads
 
 
 	def get_collapsed_length(self, sentence_num):
