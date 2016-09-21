@@ -31,7 +31,10 @@ class ParcCorenlpReader(object):
 		parc_options={}
 	):
 		
-		# Reconstruct the parc and corenlp datastructures
+		# Own the raw text
+		self.raw_txt = raw_txt
+
+		# Construct the parc and corenlp datastructures
 		self.parc = ParcAnnotatedText(
 			parc_xml, include_nested=False,
 			**parc_options
@@ -39,7 +42,6 @@ class ParcCorenlpReader(object):
 		self.core = CorenlpAnnotatedText(
 			corenlp_xml, aida_json, **corenlp_options
 		)
-		self.raw_txt = raw_txt
 
 		# Align the datastructures
 		self.sentences = []
@@ -344,29 +346,26 @@ class ParcCorenlpReader(object):
 			# Gather the attributions that exist on this sentence
 			for attribution in parc_sentence['attributions']:
 
-				# It's possible that attributions span multiple sentences,
-				# so it's possible that we've seen this attribution in a 
-				# previous sentence.  Check for that:
 				_id = attribution['id']
+
+				# It's possible that attributions span multiple sentences,
+				# so if we've seen this attribution in a previous sentence,
+				# get a reference to it
 				if _id in self.attributions:
+					new_attribution = self.attributions[_id]
 
-					# We've seen this attribution in a previous sentence
-					# We can simply add it to this sentence's attributions
-					# -- no need to build it.
-					core_sentence['attributions'][_id] = (
-						self.attributions[_id])
-					continue
+				# Otherwise build the attribution, and add it to the global
+				# list of attributions for the article.
+				else:
+					new_attribution = {
+						'id':_id, 'content':[], 'cue':[], 'source':[]
+					}
+					self.attributions[_id] = new_attribution
 
-				# Build a version of the attribution that contains 
-				# CoreNLP tokens rather than token index spans
-				new_attribution = {
-					'id':_id, 'content':[], 'cue':[], 'source':[]
-				}
-
+				# Add the attribution to the list for this sentence
 				core_sentence['attributions'][_id] = new_attribution
-				self.attributions[_id] = new_attribution
 
-				# we'll populate the attribution spans with actual 
+				# Populate the attribution spans with actual 
 				# tokens (they are currently just index ranges).  We'll
 				# populate them with corenlp's tokens
 				for role in ROLES:
@@ -749,7 +748,13 @@ class ParcAnnotatedText(object):
 					_id = attribution['id']
 
 					# Keep track of the viable attributions that are 
-					# competing for this word
+					# competing for this word.  This is important if 
+					# include nested is false, because then we allow only 
+					# one attribution to "own" a token.  We can also
+					# pre-emptively eliminated attributions explicitly 
+					# flagged as nested
+					if 'Nested' in _id:
+						continue
 					viable_attributions.append(_id)
 
 					# Keep track of the order in which attributions were
