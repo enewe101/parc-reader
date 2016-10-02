@@ -1,7 +1,7 @@
 from parc_reader.utils import IncrementingMap as IncMap, rangify
 from bs4 import BeautifulSoup as Soup
 from corenlp_xml_reader.annotated_text import (
-	AnnotatedText as CorenlpAnnotatedText
+	AnnotatedText as CorenlpAnnotatedText, Token
 )
 from itertools import izip_longest
 from collections import defaultdict
@@ -31,7 +31,7 @@ class ParcCorenlpReader(object):
 		parc_options={}
 	):
 		
-		# Own the raw text
+		# Own the raw text and the id prefix
 		self.raw_txt = raw_txt
 
 		# Construct the parc and corenlp datastructures
@@ -50,6 +50,41 @@ class ParcCorenlpReader(object):
 		# Determine where paragraph breaks should go
 		if self.raw_txt is not None:
 			self.delineate_paragraphs()
+
+		# Initialize an incrementing integer, used for generating new
+		# attribution ids
+		self.incrementing_integer = 0
+
+
+	def wrap_as_html_page(self, body_content):
+		return (
+			'<html>' 
+			+ self.get_html_head() 
+			+ '<body>' + body_content + '</body>'
+			+ '</html>'
+		)
+
+
+	def get_html_head(self):
+		return ' '.join([
+			'<head><style>',
+			'body {line-height: 40px;}',
+			'p {margin-bottom: 30px; margin-top: 0}',
+			'.quote-cue {color: blue; text-decoration: underline;}',
+			'.quote-source {color: blue; font-weight: bold;}',
+			'.quote-content {color: blue; font-style: italic;}',
+			'.cue-head {border-bottom: 1px solid blue}',
+			'.source-head {border-top: 1px solid blue}',
+			'.token {position: relative}',
+			'.pos {position: absolute; font-size: 0.6em;',
+			'top: 6px; left: 50%; font-weight: normal; font-style: normal}',
+			'.pos-inner {position: relative; left:-50%}',
+			'.attribution-id {display: block; font-size:0.6em;',
+				'margin-bottom:-20px;}',
+			'.daggar::before {content:"*"; vertical-align:super;',
+				'font-size:0.8em;}',
+			'</style></head>'
+		])  
 
 
 	def get_attribution_html(self, attribution):
@@ -75,12 +110,13 @@ class ParcCorenlpReader(object):
 		except IndexError:
 			source_head = None
 
-		# first, get the sentence(s) involved in the attribution
+		# First, get the sentence(s) involved in the attribution
 		# (and their tokens)
 		all_span_tokens = (
 			attribution['cue'] + attribution['source'] 
 			+ attribution['content'])
-		sentence_ids = [t['sentence_id'] for t in all_span_tokens]
+		sentence_ids = attribution.get_sentence_ids()
+		#sentence_ids = [t['sentence_id'] for t in all_span_tokens]
 		sentences = self.sentences[min(sentence_ids) : max(sentence_ids)+1]
 		tokens = []
 		for sentence in sentences:
@@ -109,7 +145,7 @@ class ParcCorenlpReader(object):
 
 				# Open the new role, if any
 				if role is not None:
-					this_word = this_word + '<span class="%s">' % role
+					this_word = this_word + '<span class="quote-%s">' % role
 
 			else:
 				this_word = ' '
@@ -118,8 +154,8 @@ class ParcCorenlpReader(object):
 			# If the token is the head of the cue phrase, style accordingly
 			if token is cue_head:
 				this_word = (
-					this_word + '<span class="token cue-head">' +
-					token['word'] 
+					this_word + '<span class="token cue-head">'
+					+ self.transform_word(token, role)
 					+ '<span class="pos"><span class="pos-inner">'
 					+ token['pos'] + '</span></span>'
 					+ '</span>'
@@ -127,8 +163,8 @@ class ParcCorenlpReader(object):
 
 			elif token is source_head:
 				this_word = (
-					this_word + '<span class="token source-head">' +
-					token['word'] 
+					this_word + '<span class="token source-head">'
+					+ self.transform_word(token, role)
 					+ '<span class="pos"><span class="pos-inner">'
 					+ token['pos'] + '</span></span>' 
 					+ '</span>'
@@ -138,7 +174,7 @@ class ParcCorenlpReader(object):
 				this_word = (
 					this_word 
 					+ '<span class="token">'
-					+ token['word']
+					+ self.transform_word(token, role)
 					+ '<span class="pos"><span class="pos-inner">'
 					+ token['pos'] + '</span></span>'
 					+ '</span>'
@@ -155,6 +191,22 @@ class ParcCorenlpReader(object):
 			words += '</span>'
 
 		return words
+
+
+	def transform_word(self, token, role):
+		'''
+		Provides additional token-specific transformations for the HTML
+		display of the token.  Currently this is only used to add an 
+		asterisk to personal pronouns that arise in source role.
+		'''
+
+		if role is 'source' and token['pos'] in ['PRP', 'PRP$']:
+			return token['word'] + '<span class="daggar"></span>'
+
+		else:
+			return token['word']
+
+
 
 
 	def delineate_paragraphs(self):
@@ -329,6 +381,134 @@ class ParcCorenlpReader(object):
 		return len(''.join([t['word'] for t in tokens]))
 
 
+	def get_attribution_id(self, id_formatter):
+		'''
+		Provides an attribution id that is guaranteed to be unique
+		within object instances using an incrementing integer.  The integer
+		is appended onto the id_formatter.
+		'''
+		self.incrementing_integer += 1
+		try:
+			return id_formatter % (self.incrementing_integer - 1)
+		except TypeError:
+			return id_formatter + str(self.incrementing_integer - 1)
+
+
+	def remove_attribution(self, attribution_id):
+		'''
+		Deletes the attribution identified by attribution_id, including
+		all references from sentences, tokens, and globally
+		'''
+		attribution = self.attributions[attribution_id]
+
+		# first remove the attribution from each of the tokens
+		sentence_ids = set()
+		tokens = (
+			attribution['cue'] + attribution['content'] 
+			+ attribution['source']
+		)
+		for token in tokens:
+			sentence_ids.add(token['sentence_id'])
+			token['role'] = None
+			token['attribution'] = None
+
+		# Delete references to the attribution on sentences
+		for sentence_id in sentence_ids:
+			sentence = self.sentences[sentence_id]
+			del sentence['attributions'][attribution_id]
+
+		# Delete the global reference to the attribution
+		del self.attributions[attribution_id]
+
+
+	def add_attribution(
+		self, 
+		cue_tokens=[], 
+		content_tokens=[], 
+		source_tokens=[], 
+		attribution_id=None,
+		id_formatter=''
+	):
+		'''
+		Add a new attribution.  Create links from the sentences and tokens,
+		involved, and make a reference on the global attributions list.
+		'''
+
+		# If no id was supplied, make one
+		if attribution_id is None:
+			attribution_id = self.get_attribution_id(id_formatter)
+
+		# Before proceeding, make sure that none of the tokens are already
+		# part of an attribution.  This class currently doesn't support
+		# tokens being part of multiple (i.e. nested) attributions
+		tokens = cue_tokens + content_tokens + source_tokens
+		for token in tokens:
+			if (
+				token['role'] is not None 
+				or token['attribution'] is not None
+			):
+				raise ValueError(
+					'Token(s) supplied for the attribution are already '
+					'part of another attribution:\n' + str(token)
+				)
+
+		# Make a new empty attribution having correct id
+		new_attribution = Attribution({
+			'id':attribution_id, 'cue':[], 'content':[], 'source':[]
+		})
+
+		# Put a reference in the global attributions list
+		self.attributions[attribution_id] = new_attribution
+
+		# Ensure each of the tokens involved in the attribution gets
+		# a reference to the attribution and gets labelled with the 
+		# correct role.  We also ensure that each sentence involved
+		# in the attribution gets a reference to the attribution
+		self.add_to_attribution(new_attribution, 'cue', cue_tokens)
+		self.add_to_attribution(new_attribution, 'content', content_tokens)
+		self.add_to_attribution(new_attribution, 'source', source_tokens)
+
+
+	def add_to_attribution(self, attribution, role, tokens):
+		'''
+		Add the given tokens to the given attribution using the given
+		role (which should be 'cue', 'content', or 'source'. 
+		'''
+
+		# Verify that the attribution is actually an Attribution
+		if not isinstance(attribution, Attribution):
+			raise ValueError(
+				'supplied attribution must be of type Attribution.')
+
+		# We'll go through each token, ensuring it has a reference to the
+		# attribution and knows its role.  At the same time, we'll 
+		# accumulate references to the sentence(s) they belong to (normally
+		# just one sentence, but sometimes multiple).
+		sentence_ids = set()
+		for token in tokens:
+
+			# Verify that the tokens are actually Tokens
+			if not isinstance(token, Token):
+				raise ValueError(
+					'`tokens` must be an iterable of objects of type '
+					'Token.'
+				)
+
+			# Copy the role and attribution onto the token
+			token['role'] = role
+			token['attribution'] = attribution
+			sentence_ids.add(token['sentence_id'])
+
+			# Copy the token to the attribution
+			attribution[role].append(token)
+
+		# Now ensure each sentence has a reference to the attribution
+		attribution_id = attribution['id']
+		for sentence_id in sentence_ids:
+			sentence = self.sentences[sentence_id]
+			sentence['attributions'][attribution_id] = attribution
+
+
 	def merge(self):
 		'''
 		This merges information from CoreNLP with information from the
@@ -357,9 +537,9 @@ class ParcCorenlpReader(object):
 				# Otherwise build the attribution, and add it to the global
 				# list of attributions for the article.
 				else:
-					new_attribution = {
+					new_attribution = Attribution({
 						'id':_id, 'content':[], 'cue':[], 'source':[]
-					}
+					})
 					self.attributions[_id] = new_attribution
 
 				# Add the attribution to the list for this sentence
@@ -378,13 +558,13 @@ class ParcCorenlpReader(object):
 							elipsis=False
 						))
 
-			# Merge information on the tokens
+			# We'll merge information from parc tokens onto core_nlp tokens
 			aligned_tokens = zip(
 				core_sentence['tokens'], parc_sentence['tokens']
 			)
 
-			# Copy attribution membership information from parc tokens
-			# onto core_tokens.
+			# Specifically, we'll copy attribution membership information 
+			# from parc tokens onto core_tokens.
 			for core_token, parc_token in aligned_tokens:
 				if 'attribution_id' in parc_token:
 					_id = parc_token['attribution_id']
@@ -398,6 +578,15 @@ class ParcCorenlpReader(object):
 				else:
 					core_token['attribution'] = None
 					core_token['role'] = None
+
+
+class Attribution(dict):
+
+	def get_sentence_ids(self):
+		all_span_tokens = self['cue'] + self['source'] + self['content']
+		sentence_ids = {t['sentence_id'] for t in all_span_tokens}
+		return sentence_ids
+
 
 
 # This class was an initial approach to align CoreNLP annotations to PARC
