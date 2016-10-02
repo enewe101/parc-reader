@@ -72,9 +72,14 @@ To begin working with PARC / CoreNLP data, make an instance of the ``ParcCorenlp
     >>>
     >>> parc_xml = open('data/example-parc.xml').read()
     >>> corenlp_xml = open('data/example-corenlp.xml').read()
-    >>> raw_text = oepn('data/example-raw.txt').read()
+    >>> raw_text = open('data/example-raw.txt').read()
     >>>
-    >>> article = P(parc_xml, corenlp_xml, raw_text)
+    >>> article = P(corenlp_xml, parc_xml, raw_text)
+
+(Note that both the parc_xml and raw_text are optional.  Usually it's 
+desired to provide both of them, but if, for example, there is no parc xml
+for the data you're loading, you can use this class to *create it*.  More
+on that below.)
 
 You can follow along using the same example data which ships with this
 git repo.  If you installed using pip, you can just 
@@ -185,3 +190,144 @@ all attributions in the file.
     wsj_0018_Attribution_relation_level.xml_set_9
     wsj_0018_Attribution_relation_level.xml_set_7
 
+Creating New Attributions
+-------------------------
+As mentioned above, it is possible to create a `ParcCorenlpReader` without
+loading any parc_xml (if for example if none exists for the given article). 
+This can be useful if you want to programatically *add* annotation 
+information to a existing CoreNLP annotations.  To do that, simply create
+a `ParcCorenlpReader` instance without supplying anything for the parc_xml
+argument.  
+
+You can also add additional annotations even if there is a parc_xml.  Just
+make a `ParcCorenlpReader` as usual, and use the commands shown below.
+
+To make a new annotation, use the function `add_annotation`.  Supply the 
+source, cue, and content token lists as parameters.  The tokens supplied 
+should be actual tokens from the article itself.  Suppose we have the following sentence, and we want to mark the attribution that occurs in it:
+
+.. code-block:: python
+
+    >>> article.sentence[0]
+        Sentence 0:
+             0: Pierre (0,6) NNP PERSON
+             1: Vinken (7,13) NNP PERSON
+             2: , (14,15) , -
+             3: 61 (16,18) CD DURATION
+             4: years (19,24) NNS DURATION
+             5: old (25,28) JJ DURATION
+             6: , (29,30) , -
+             7: said (31,35) VB -
+             8: he (36,38) PRP -
+             9: will (31,35) MD -
+            10: join (36,40) VB -
+            11: the (41,44) DT -
+            12: board (45,50) NN -
+            14: as (51,53) IN -
+            15: a (54,55) DT -
+            16: nonexecutive (56,68) JJ -
+            17: director (69,77) NN -
+            18: Nov. (78,82) NNP DATE
+            19: 29 (83,85) CD DATE
+            20: . (86,87) . -
+
+We collect the tokens involved in different parts of the attribution, and
+use them to create a new attribution:
+
+.. code-block:: python
+
+    >>> source = article.sentences[0]['tokens'][0:2]
+    >>> cue = article.sentences[0]['tokens'][7:8]
+    >>> content = article.sentences[0]['tokens'][8:20]
+    >>> 
+    >>> attribution = article.add_attribution(
+        cue_tokens=cue, 
+        content_tokens=content, 
+        source_tokens=source, 
+        id_formatter='my\_attribution\_'
+    )
+
+This creates references from the global attributions dictionary, from the 
+sentence(s) involved in the attribution, as well as from the tokens involved
+in the attribution.  It also adds role information to the tokens.  In other
+words, the result is exactly as if the attribution were read from a parc_xml 
+file:
+
+.. code-block:: python
+
+    >>> article.attributions.keys()
+    'my_attribution_0'
+    >>> article.sentences[0]['attributions'].keys()
+    'my_attribution_0'
+    >>>
+    >>> article.sentences[0]['tokens'][0]['role']
+    'source'
+    >>>
+    >>> article.sentences[0]['tokens'][0]['attribution']
+    {'my_attribution_0': {
+        'id': 'my_attribution_0',
+        'source': [ 
+             0: Pierre (0,6) NNP PERSON,
+             1: Vinken (7,13) NNP PERSON],
+        'cue': [7: said (31,35) VB -],
+        'content': [
+             8: he (36,38) PRP -,
+             9: will (31,35) MD -,
+            10: join (36,40) VB -,
+            11: the (41,44) DT -,
+            12: board (45,50) NN -,
+            14: as (51,53) IN -,
+            15: a (54,55) DT -,
+            16: nonexecutive (56,68) JJ -,
+            17: director (69,77) NN -,
+            18: Nov. (78,82) NNP DATE,
+            19: 29 (83,85) CD DATE]
+        }
+    }
+
+The call signature for `add_attribution` is:
+
+.. code-block:: python
+
+	add_attribution(
+		cue_tokens=[], 
+		content_tokens=[], 
+		source_tokens=[], 
+		attribution_id=None,
+		id_formatter=''
+	)
+
+All of the arguments to `add_attribution` are optional, meaning that you can 
+create an empty attribution and fill it later  
+(described below).  Every attribution must be given a unique id.  You can either
+supply the id via the `attribution_id` parameter, or you can simply supply
+an `id_formatter` which is a prefix that gets an incrementing integer added
+onto it to create a unique id.  If the `id_formatter` contains a `'%d'` then
+this will be replaced by the integer so you can have arbitrarily formatted ids.
+If you suuply neither an `attribution_id` nor an `id_formatter`, then the id 
+will simply be an integer (as a string).
+
+You can also make an empty attribution, and then fill in tokens for given roles 
+afterwards.  The following has the exact same effect as the previous example:
+
+.. code-block:: python
+
+    >>> source = article.sentences[0]['tokens'][0:2]
+    >>> cue = article.sentences[0]['tokens'][7:8]
+    >>> content = article.sentences[0]['tokens'][8:20]
+    >>> 
+    >>> attribution = article.add_attribution(id_formatter='my\_attribution\_')
+    >>> article.add_to_attribution(attribution, 'source', source)
+    >>> article.add_to_attribution(attribution, 'cue', cue)
+    >>> article.add_to_attribution(attribution, 'content', content)
+
+Note that it isn't necessary to supply tokens for each role ('source', 'cue', 
+and 'content'), indeed you could supply none but that probably wouldn't come in 
+handy.
+
+Note that tokens can only be part of one attribution.  The `ParcCorenlpReader`
+doesn't support nested attributions!
+
+Trying to create an attribution using an attribution_id that's already in use,
+or trying to create an attribution involving token(s) that are already part
+of another attribution will cause a `ValueError` to be raised.

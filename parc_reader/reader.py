@@ -449,7 +449,18 @@ class ParcCorenlpReader(object):
 
 		# If no id was supplied, make one
 		if attribution_id is None:
-			attribution_id = self.get_attribution_id(id_formatter)
+
+			# Ensure the id is unique
+			while True:
+				attribution_id = self.get_attribution_id(id_formatter)
+				if attribution_id not in self.attributions:
+					break
+
+		if attribution_id in self.attributions:
+			raise ValueError(
+				'The attribution_id supplied is already in use: %s'
+				% attribution_id
+			)
 
 		# Before proceeding, make sure that none of the tokens are already
 		# part of an attribution.  This class currently doesn't support
@@ -480,6 +491,8 @@ class ParcCorenlpReader(object):
 		self.add_to_attribution(new_attribution, 'cue', cue_tokens)
 		self.add_to_attribution(new_attribution, 'content', content_tokens)
 		self.add_to_attribution(new_attribution, 'source', source_tokens)
+
+		return new_attribution
 
 
 	def add_to_attribution(self, attribution, role, tokens):
