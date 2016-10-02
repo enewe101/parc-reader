@@ -333,3 +333,18 @@ doesn't support nested or overlapping attributions!
 Trying to create an attribution using an attribution_id that's already in use,
 or trying to create an attribution involving token(s) that are already part
 of another attribution will cause a ``ValueError`` to be raised.
+
+Finally, you can delete attributions by supplying the `attribution_id`.
+All references throughout the datastructure to the attribution will be
+cleaned up.
+
+.. code-block:: python
+
+    >>> 'my_attribution_0' in article.attributions
+    True
+    >>>
+    >>> article.remove_attribution('my_attribution_0')
+    >>>
+    >>> 'my_attribution_0' in article.attributions
+    False
+
