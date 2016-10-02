@@ -23,29 +23,42 @@ class ParcCorenlpReader(object):
 
 	def __init__(
 		self, 
-		parc_xml, 
 		corenlp_xml, 
-		raw_txt,
+		parc_xml=None, 
+		raw_txt=None,
 		aida_json=None, 
 		corenlp_options={},
 		parc_options={}
 	):
-		
+
 		# Own the raw text and the id prefix
 		self.raw_txt = raw_txt
 
-		# Construct the parc and corenlp datastructures
-		self.parc = ParcAnnotatedText(
-			parc_xml, include_nested=False,
-			**parc_options
-		)
+		# Construct the corenlp datastructure
 		self.core = CorenlpAnnotatedText(
 			corenlp_xml, aida_json, **corenlp_options
 		)
 
+		# Construct the parc datastructure if parc_xml was supplied
+		self.parc = None
+		if parc_xml is not None:
+			self.parc = ParcAnnotatedText(
+				parc_xml, include_nested=False,
+				**parc_options
+			)
+
 		# Align the datastructures
 		self.sentences = []
-		self.merge()
+
+		# If we have a parc datastructure, we'll merge it with the corenlp
+		# datastructure now
+		if self.parc is not None:
+			self.merge()
+
+		# Otherwise, we'll just put placeholders for parc properties in
+		# the corenlp datastructure
+		else:
+			self.blank_merge()
 
 		# Determine where paragraph breaks should go
 		if self.raw_txt is not None:
@@ -507,6 +520,23 @@ class ParcCorenlpReader(object):
 		for sentence_id in sentence_ids:
 			sentence = self.sentences[sentence_id]
 			sentence['attributions'][attribution_id] = attribution
+
+
+	def blank_merge(self):
+		'''
+		This is called instead of merge when there is no parc datastructure
+		to be merged with the corenlp datastructure.  Instead, it just
+		adds the parc properties into the datastructure, filling them 
+		with None's and empty dictionaries.  This makes it possible to
+		add new attributions to the datastructure.
+		'''
+		self.attributions = {}
+		for sentence in self.core.sentences:
+			self.sentences.append(sentence)
+			sentence['attributions'] = {}
+			for token in sentence['tokens']:
+				token['role'] = None
+				token['attribution'] = None
 
 
 	def merge(self):
