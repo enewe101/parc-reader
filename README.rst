@@ -195,12 +195,13 @@ Creating New Attributions
 As mentioned above, it is possible to create a ``ParcCorenlpReader`` without
 loading any parc_xml (if for example if none exists for the given article). 
 This can be useful if you want to programatically *add* annotation 
-information to a existing CoreNLP annotations.  To do that, simply create
+information to existing CoreNLP annotations.  To do that, simply create
 a ``ParcCorenlpReader`` instance without supplying anything for the parc_xml
 argument.  
 
-You can also add additional annotations even if there is a parc_xml.  Just
-make a ``ParcCorenlpReader`` as usual, and use the commands shown below.
+You can also add additional annotations even if you've loaded parc_xml.  
+Just make a ``ParcCorenlpReader`` as usual, and use the commands shown 
+below.
 
 To make a new annotation, use the function ``add_annotation``.  Supply the 
 source, cue, and content token lists as parameters.  The tokens supplied 
@@ -244,14 +245,14 @@ use them to create a new attribution:
         cue_tokens=cue, 
         content_tokens=content, 
         source_tokens=source, 
-        id_formatter='my\_attribution\_'
+        id_formatter='my_attribution_'
     )
 
-This creates references from the global attributions dictionary, from the 
-sentence(s) involved in the attribution, as well as from the tokens involved
-in the attribution.  It also adds role information to the tokens.  In other
-words, the result is exactly as if the attribution were read from a parc_xml 
-file:
+References to the new attribution will automatically be created in the 
+global attributions dictionary, in the sentence(s) involved, and in the 
+tokens involved in the attribution.  
+It also adds role information to the tokens.  In other words, the result is 
+exactly as if the attribution were read from a parc_xml file:
 
 .. code-block:: python
 
@@ -304,7 +305,7 @@ supply the id via the ``attribution_id`` parameter, or you can simply supply
 an ``id_formatter`` which is a prefix that gets an incrementing integer added
 onto it to create a unique id.  If the ``id_formatter`` contains a ``'%d'`` then
 this will be replaced by the integer so you can have arbitrarily formatted ids.
-If you suuply neither an ``attribution_id`` nor an ``id_formatter``, then the id 
+If you supply neither an ``attribution_id`` nor an ``id_formatter``, then the id 
 will simply be an integer (as a string).
 
 You can also make an empty attribution, and then fill in tokens for given roles 
@@ -317,16 +318,17 @@ afterwards.  The following has the exact same effect as the previous example:
     >>> content = article.sentences[0]['tokens'][8:20]
     >>> 
     >>> attribution = article.add_attribution(id_formatter='my\_attribution\_')
+    >>>
     >>> article.add_to_attribution(attribution, 'source', source)
     >>> article.add_to_attribution(attribution, 'cue', cue)
     >>> article.add_to_attribution(attribution, 'content', content)
 
-Note that it isn't necessary to supply tokens for each role ('source', 'cue', 
-and 'content'), indeed you could supply none but that probably wouldn't come in 
-handy.
+Note that it isn't necessary to supply tokens for each role.  For example
+you could just supply token(s) for the 'cue' role, or indeed leave the 
+attribution completely empty.
 
 Note that tokens can only be part of one attribution.  The ``ParcCorenlpReader``
-doesn't support nested attributions!
+doesn't support nested or overlapping attributions!
 
 Trying to create an attribution using an attribution_id that's already in use,
 or trying to create an attribution involving token(s) that are already part
