@@ -1,3 +1,4 @@
+from xml.dom import minidom
 from parc_reader.utils import IncrementingMap as IncMap, rangify
 from bs4 import BeautifulSoup as Soup
 from corenlp_xml_reader.annotated_text import (
@@ -69,18 +70,149 @@ class ParcCorenlpReader(object):
 		self.incrementing_integer = 0
 
 
-	def wrap_as_html_page(self, body_content):
+	def get_parc_xml(self, indent='  '):
+		xml_dom = self.create_xml_dom()
+		return xml_dom.toprettyxml(indent=indent)
+
+
+	def create_xml_dom(self):
+
+		# Make a document and a root element
+		doc = minidom.Document()
+		root = doc.createElement('root')
+		doc.appendChild(root)
+
+		# Make an element for every sentence tag
+		gorn = 0
+		word = 0
+		for sentence in self.sentences:
+
+			sentence_word = 0	# keeps track of token index w/in sentence
+
+			# First get the top (sentence) tag (bypass the root tag)
+			sentence_constituent = sentence['c_root']['c_children'][0]
+
+			# Recursively build the sentence tag (with all constituent
+			# and word tags)
+			root_sentence_xml_tag = doc.createElement('SENTENCE')
+			root_sentence_xml_tag.setAttribute('gorn', str(gorn))
+			sentence_xml_tag, word, sentence_word = (
+				self.create_sentence_tag(
+					doc, sentence_constituent, word=word, 
+					sentence_word=sentence_word, gorn_trail=(), gorn=gorn
+				)
+			)
+			root_sentence_xml_tag.appendChild(sentence_xml_tag)
+			gorn += 1
+
+			# Append the sentence tag to the growing document
+			root.appendChild(root_sentence_xml_tag)
+
+		return doc
+
+
+	def create_sentence_tag(
+		self,
+		doc,
+		constituent,
+		word=0,
+		sentence_word=0,
+		gorn_trail=(),
+		gorn=0
+	):
+
+		# Is this a compund constituent, or a token?
+		is_token = False
+		if len(constituent['c_children']) == 0:
+			is_token = True
+
+		# Create the xml tag for this constituent
+		if is_token:
+			element = doc.createElement('WORD')
+			element.setAttribute(
+				'ByteCount', '%s,%s' % (
+				constituent['character_offset_begin'],
+				constituent['character_offset_end'])
+			)
+			element.setAttribute('lemma', constituent['lemma'])
+			element.setAttribute('pos', constituent['pos'])
+			element.setAttribute('text', constituent['word'])
+			element.setAttribute('gorn', self.gorn_str(gorn_trail, gorn))
+			element.setAttribute('word', str(word))
+			element.setAttribute('sentenceWord', str(sentence_word))
+			word += 1
+			sentence_word += 1
+
+			if constituent['attribution'] is not None:
+				attribution = doc.createElement('attribution')
+				attribution.setAttribute(
+					'id', constituent['attribution']['id']
+				)
+				attribution_role = doc.createElement('attributionRole')
+				attribution_role.setAttribute(
+					'roleValue', constituent['role'])
+				attribution.appendChild(attribution_role)
+				element.appendChild(attribution)
+
+			return element, word, sentence_word
+
+		element = doc.createElement(constituent['c_tag'])
+		element.setAttribute('gorn', self.gorn_str(gorn_trail, gorn))
+
+		# Create the child elements
+		child_gorn = 0
+		for child in constituent['c_children']:
+			child_elm, word, sentence_word = self.create_sentence_tag(
+				doc, child, word=word, sentence_word=sentence_word,
+				gorn_trail=(gorn_trail + (gorn,)), gorn=child_gorn
+			)
+			element.appendChild(child_elm)
+			child_gorn += 1
+
+		return element, word, sentence_word
+
+
+	def gorn_str(self, gorn_trail, gorn):
+		return ','.join([str(g) for g in gorn_trail + (gorn,)])
+
+
+	def __str__(self):
+		return self.core.__str__()
+
+
+	def wrap_as_html_page(
+		self,
+		body_content,
+		additional_styling='',
+		show_pos=True,
+		additional_head_elements=''
+	):
 		return (
 			'<html>' 
-			+ self.get_html_head() 
+			+ self.get_html_head(
+				additional_styling, show_pos, additional_head_elements) 
 			+ '<body>' + body_content + '</body>'
 			+ '</html>'
 		)
 
 
-	def get_html_head(self):
+	def get_html_head(self, additional_styling='', show_pos=True,
+		additional_head_elements=''
+	):
+		if show_pos:
+			pos_styling = ' '.join([
+				'.pos {position: absolute; font-size: 0.6em;',
+					'top: 6px; left: 50%; font-weight: normal;',
+					'font-style: normal}',
+				'.pos-inner {position: relative; left:-50%}',
+			])
+		else:
+			pos_styling = '.pos {display: none;}'
+
 		return ' '.join([
-			'<head><style>',
+			'<head>',
+			additional_head_elements,
+			'<style>',
 			'body {line-height: 40px;}',
 			'p {margin-bottom: 30px; margin-top: 0}',
 			'.quote-cue {color: blue; text-decoration: underline;}',
@@ -89,13 +221,12 @@ class ParcCorenlpReader(object):
 			'.cue-head {border-bottom: 1px solid blue}',
 			'.source-head {border-top: 1px solid blue}',
 			'.token {position: relative}',
-			'.pos {position: absolute; font-size: 0.6em;',
-			'top: 6px; left: 50%; font-weight: normal; font-style: normal}',
-			'.pos-inner {position: relative; left:-50%}',
 			'.attribution-id {display: block; font-size:0.6em;',
 				'margin-bottom:-20px;}',
 			'.daggar::before {content:"*"; vertical-align:super;',
 				'font-size:0.8em;}',
+			pos_styling,
+			additional_styling,
 			'</style></head>'
 		])  
 
