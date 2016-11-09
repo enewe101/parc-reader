@@ -348,3 +348,15 @@ cleaned up.
     >>> 'my_attribution_0' in article.attributions
     False
 
+
+Saving Parc Files to Disk
+---------------------------
+
+You can obtain an xml serialization of a ParcCorenlpReader, in the 
+xml format used by the parc3 dataset, then save it to disk, as follows:
+
+.. code-block:: python
+
+    >>> xml_string = article.get_parc_xml(indent='  ')
+    >>> open('my-parc-file.xml', 'w').write(xml_string)
+
