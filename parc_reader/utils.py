@@ -3,6 +3,7 @@ This module contains a couple utility classes used by the ParcCorenlpReader,
 and ParcAnnotatedText.
 '''
 
+
 def rangify(iterable):
 	'''
 	Converts a list of indices into a list of ranges (compatible with the
@@ -78,3 +79,40 @@ class IncrementingMap(dict):
 	def keys(self):
 		return [k for k in self._get_keys()]
 
+
+def get_span(sentence, start, stop):
+	return sentence['tokens'][start:stop]
+
+
+
+def get_spans(sentence, spans, elipsis=True):
+	'''
+	This function retrieves the tokens for a given list of 
+	spans.  A span is a contiguous range of tokens, and a list of
+	spans contains one or more contiguous range of tokens.  
+
+	When retrieving tokens for a list of spans that contains ore than
+	one span, we visually indicate the discontinuity that exists 
+	between spans, by adding a false token that looks like an elepsis
+	'''
+	tokens = []
+	first = True
+	for span in spans:
+
+		# We add an elipses false token to visually show that 
+		# a discontinuity exists between two spans.
+		if first:
+			first = False
+		elif elipsis:
+			tokens.append(
+				{'word':'...'}
+			)
+
+		# Collect the tokens represented by the span
+		try:
+			tokens.extend(get_span(sentence, *span))
+		except TypeError:
+			print span
+			raise
+
+	return tokens
