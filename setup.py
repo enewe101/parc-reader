@@ -23,7 +23,7 @@ setup(
 	# single-sourcing
     # the version across setup.py and the project code, see
     # https://packaging.python.org/en/latest/single_source_version.html
-    version='0.0.7',
+    version='0.0.8',
 
     description='Work with the PARC dataset in Python',
     long_description=long_description,

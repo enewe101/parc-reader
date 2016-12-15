@@ -425,9 +425,11 @@ class ParcCorenlpReader(object):
 				)
 
 		# Make a new empty attribution having correct id
-		new_attribution = Attribution({
+		new_attribution = Attribution(self, {
 			'id':attribution_id, 'cue':[], 'content':[], 'source':[]
 		})
+
+		print new_attribution['id']
 
 		# Put a reference in the global attributions list
 		self.attributions[attribution_id] = new_attribution
