@@ -542,14 +542,13 @@ class ParcCorenlpReader(object):
 				# tokens (they are currently just index ranges).  We'll
 				# populate them with corenlp's tokens
 				for role in ROLES:
-					for span in attribution[role]:
 
-						# replace attribution index spans with actual
-						# tokens
-						new_attribution[role].extend(get_spans(
-							core_sentence, attribution[role], 
-							elipsis=False
-						))
+					# replace attribution index spans with actual
+					# tokens
+					new_attribution[role].extend(get_spans(
+						core_sentence, attribution[role], 
+						elipsis=False
+					))
 
 			# We'll merge information from parc tokens onto core_nlp tokens
 			aligned_tokens = zip(
