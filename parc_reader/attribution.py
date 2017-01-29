@@ -12,3 +12,11 @@ class Attribution(dict):
 		sentence_ids = {t['sentence_id'] for t in all_span_tokens}
 		return sentence_ids
 
+	def __eq__(self, other):
+		"""
+		See the docstring for corenlp_xml_reader.Sentence.__eq__().
+		"""
+		return id(self) == id(other)
+
+	def __ne__(self, other):
+		return self.__eq__(other)

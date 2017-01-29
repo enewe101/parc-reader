@@ -279,8 +279,6 @@ class ParcCorenlpReader(object):
 			# "paragraphs" as needed.
 			last_excess = closest_length - target_length
 
-
-
 		# If there's sentences left over, add them to the last paragraph
 		additional_sentences = self.sentences[sentence_pointer:]
 		for sentence in additional_sentences:
@@ -393,6 +391,18 @@ class ParcCorenlpReader(object):
 		'''
 		Add a new attribution.  Create links from the sentences and tokens,
 		involved, and make a reference on the global attributions list.
+
+		Note that `cue_tokens`, `source_tokens`, and `content_tokens` can be
+		either a list of token objects, or a list of (sentence_ID, token_ID)
+		tuples.  If token objects are provided, then will be converted into
+		(sentence_ID, token_ID) tuples.  This allows the token id to be looked
+		up on the reader object itself, this handles the case where one has
+		opened two separarate copies of "the same" article, and one attempts
+		to add tokens from one article into the attribution of another -- 
+		it would still work, but would in fact always add tokens that come from
+		the same reader as the attribution.  This is important because links
+		from the tokens themselves are made to the attribution, and are relied
+		upon in the functioning of the class.
 		'''
 
 		# If no id was supplied, make one
@@ -445,10 +455,24 @@ class ParcCorenlpReader(object):
 		return new_attribution
 
 
+	# TODO: does this prevent overlapping attibutions, like the way
+	#	`add_attribution` does?
 	def add_to_attribution(self, attribution, role, tokens):
 		'''
 		Add the given tokens to the given attribution using the given
 		role (which should be 'cue', 'content', or 'source'. 
+
+		Note that `cue_tokens`, `source_tokens`, and `content_tokens` can be
+		either a list of token objects, or a list of (sentence_ID, token_ID)
+		tuples.  If token objects are provided, then will be converted into
+		(sentence_ID, token_ID) tuples.  This allows the token id to be looked
+		up on the reader object itself, this handles the case where one has
+		opened two separarate copies of "the same" article, and one attempts
+		to add tokens from one article into the attribution of another -- 
+		it would still work, but would in fact always add tokens that come from
+		the same reader as the attribution.  This is important because links
+		from the tokens themselves are made to the attribution, and are relied
+		upon in the functioning of the class.
 		'''
 
 		# Verify that the attribution is actually an Attribution
@@ -456,12 +480,27 @@ class ParcCorenlpReader(object):
 			raise ValueError(
 				'supplied attribution must be of type Attribution.')
 
+		# Resolve the tokens, ensuring that they are tokens belonging to
+		# this reader, and not some other reader.
+		resolved_tokens = []
+		for token in tokens:
+
+			# Which sentence and token ID addresses this token?
+			if isinstance(token, tuple):
+				sentence_id, token_id = token
+			elif isinstance(token, Token):
+				sentence_id, token_id = token['sentence_id'], token['id']
+
+			# Get that token from this reader.
+			resolved_tokens.append(
+				self.sentences[sentence_id]['tokens'][token_id])
+
 		# We'll go through each token, ensuring it has a reference to the
 		# attribution and knows its role.  At the same time, we'll 
 		# accumulate references to the sentence(s) they belong to (normally
 		# just one sentence, but sometimes multiple).
 		sentence_ids = set()
-		for token in tokens:
+		for token in resolved_tokens:
 
 			# Verify that the tokens are actually Tokens
 			if not isinstance(token, Token):
@@ -570,7 +609,6 @@ class ParcCorenlpReader(object):
 				else:
 					core_token['attribution'] = None
 					core_token['role'] = None
-
 
 
 
