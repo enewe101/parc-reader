@@ -23,7 +23,7 @@ setup(
 	# single-sourcing
     # the version across setup.py and the project code, see
     # https://packaging.python.org/en/latest/single_source_version.html
-    version='0.1.0',
+    version='0.1.1',
 
     description='Work with the PARC dataset in Python',
     long_description=long_description,
@@ -73,5 +73,5 @@ setup(
 		'data/example-parc.xml',
 		'data/example-corenlp.xml',
 	]},
-	install_requires=['bs4', 'corenlp-xml-reader']
+	install_requires=['bs4', 'corenlp-xml-reader>=0.1.2']
 )
