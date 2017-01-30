@@ -19,4 +19,4 @@ class Attribution(dict):
 		return id(self) == id(other)
 
 	def __ne__(self, other):
-		return self.__eq__(other)
+		return not self.__eq__(other)
