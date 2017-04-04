@@ -29,45 +29,48 @@ def text(text_content):
 class AttributionHtmlSerializer(object):
 
 
-	def serialize_attributions(self, attributions, resolve_pronouns=False):
+	@classmethod
+	def serialize_attributions(cls, attributions, resolve_pronouns=False):
 		'''
 		This accepts an iterable of Attribution objects, and produces
 		an HTML page that visualizes them.
 		'''
 		# Make a dom and basic top-level page structure
-		dom, body = self.prepare_dom()
+		dom, body = cls.prepare_dom()
 		for attribution in attributions:
-			attribution_element = self.get_attribution_element(
+			attribution_element = cls.get_attribution_element(
 				attribution, resolve_pronouns)
 			body.appendChild(attribution_element)
 
 		return dom.toprettyxml(indent='  ')
 
 
+	@classmethod
 	def get_attribution_html(
-		self, attribution, resolve_pronouns=False,
+		cls, attribution, resolve_pronouns=False,
 		indent='', newl=' '
 	):
-		attribution_element = self.get_attribution_element(
+		attribution_element = cls.get_attribution_element(
 			attribution, resolve_pronouns)
 		return attribution_element.toprettyxml(indent=indent, newl=newl)
 
 
-	def get_attribution_element(self, attribution, resolve_pronouns=False):
+	@classmethod
+	def get_attribution_element(cls, attribution, resolve_pronouns=False):
 
 		# Get the source and cue head so they can be specially highlighted
-		cue_head = self.get_cue_head(attribution)
-		source_head = self.get_source_head(attribution)
+		cue_head = cls.get_cue_head(attribution)
+		source_head = cls.get_source_head(attribution)
 
 		# Group together tokens that are part of the same attribution role
-		token_groups = self.group_tokens(attribution)
+		token_groups = cls.group_tokens(attribution)
 
 		# Make an element to contain the markup for this attribution
 		attribution_element = div({'class':'attribution'})
 
 		# Populate it with markup for all the tokens in this attribution
 		for token_group in token_groups:
-			token_group_element = self.make_token_group_element(
+			token_group_element = cls.make_token_group_element(
 				token_group, resolve_pronouns, cue_head, source_head
 			)
 			attribution_element.appendChild(token_group_element)
@@ -75,20 +78,22 @@ class AttributionHtmlSerializer(object):
 		return attribution_element
 
 
-	def prepare_dom(self, additional_styling={}):
+	@classmethod
+	def prepare_dom(cls, additional_styling={}):
 
 		# Make a document, and put the basic elements in it
 		dom = minidom.Document()
 		html = dom.appendChild(dom.createElement('html'))
 		html.appendChild(
-			self.get_head_element(additional_styling=additional_styling))
+			cls.get_head_element(additional_styling=additional_styling))
 		body = html.appendChild(dom.createElement('body'))
 
 		return dom, body
 
 
+	@classmethod
 	def make_token_group_element(
-		self,
+		cls,
 		token_group,
 		resolve_pronouns,
 		cue_head = None,
@@ -103,20 +108,21 @@ class AttributionHtmlSerializer(object):
 			# Here we can optionally detect and resolve pronouns
 			if resolve_pronouns and role == 'source':
 				if token['pos'] == 'PRP':
-					resolved_element = self.make_resolved_element(
+					resolved_element = cls.make_resolved_element(
 						token, cue_head, source_head)
 					group_element.appendChild(resolved_element)
 					continue
 
 			# But usually we just make the element for each token
-			token_element = self.make_token_element(
+			token_element = cls.make_token_element(
 				token, cue_head, source_head)
 			group_element.appendChild(token_element)
 
 		return group_element
 
 
-	def make_token_element(self, token, cue_head=None, source_head=None):
+	@staticmethod
+	def make_token_element(token, cue_head=None, source_head=None):
 
 		# check if element is the cue head or source head, and adjust 
 		# token element's class accordingly
@@ -136,10 +142,11 @@ class AttributionHtmlSerializer(object):
 		return token_element
 
 
-	def make_resolved_element(self, token, cue_head=None, source_head=None):
+	@classmethod
+	def make_resolved_element(cls, token, cue_head=None, source_head=None):
 
 		# Get the representative mention for the token, if any
-		resolved_tokens = self.substitute_pronoun_token(token)
+		resolved_tokens = cls.substitute_pronoun_token(token)
 
 		# If a representative element was found, make the html representing
 		# it, leaving a stylable div wrapping the replacement text so
@@ -147,19 +154,20 @@ class AttributionHtmlSerializer(object):
 		if resolved_tokens is not None:
 			resolved_element = span({'class':'pronoun'})
 			for resolved_token in resolved_tokens:
-				token_element = self.make_token_element(
+				token_element = cls.make_token_element(
 					resolved_token, cue_head, source_head)
 				resolved_element.appendChild(token_element)
 
 		# Otherwise, just get the element for the original token
 		else:
-			resolved_element = self.make_token_element(token)
+			resolved_element = cls.make_token_element(token)
 
 		# Return the element, whether reprsenting replacement or original
 		return resolved_element
 	
 
-	def substitute_pronoun_token(self, token):
+	@staticmethod
+	def substitute_pronoun_token(token):
 
 		# Check if we have a representative mention that can be used
 		# to substitute the pronoun.  If not, fail.
@@ -187,10 +195,11 @@ class AttributionHtmlSerializer(object):
 		return tokens
 
 
-	def group_tokens(self, attribution):
+	@classmethod
+	def group_tokens(cls, attribution):
 
 		# Get the sentences involved in the attribution
-		sentences = self.get_sentences(attribution)
+		sentences = cls.get_sentences(attribution)
 
 		# Get all the tokens, and group them into contiguous groups having
 		# the same attribution role
@@ -205,7 +214,7 @@ class AttributionHtmlSerializer(object):
 		for token in tokens:
 
 			# Get this token's role relative to the focal attribution
-			role = self.get_token_role(token, attribution)
+			role = cls.get_token_role(token, attribution)
 
 			# Was there a role-change?
 			if role != prev_role:
@@ -228,7 +237,8 @@ class AttributionHtmlSerializer(object):
 		return token_groups
 
 
-	def get_token_role(self, token, attribution):
+	@staticmethod
+	def get_token_role(token, attribution):
 
 		# Ignore roles for the tokens in other attributions
 		if token['attribution'] is not None:
@@ -239,7 +249,8 @@ class AttributionHtmlSerializer(object):
 		return token['role']
 
 
-	def get_sentences(self, attribution):
+	@staticmethod
+	def get_sentences(attribution):
 
 		# Get all the tokens directly involved in the attribution,
 		# and use these to find the implicated sentences
@@ -261,7 +272,8 @@ class AttributionHtmlSerializer(object):
 		return sentences
 
 
-	def get_cue_head(self, attribution):
+	@staticmethod
+	def get_cue_head(attribution):
 		# Find out what the head of the cue span is -- we want to give
 		# it it's own styling
 		try:
@@ -272,7 +284,8 @@ class AttributionHtmlSerializer(object):
 		return cue_head
 
 
-	def get_source_head(self, attribution):
+	@staticmethod
+	def get_source_head(attribution):
 		# Find out what the head of the source span is -- we want to give
 		# it it's own styling
 		try:
@@ -283,8 +296,8 @@ class AttributionHtmlSerializer(object):
 		return source_head
 
 
+	@staticmethod
 	def get_head_element(
-		self, 
 		additional_styling={},
 		show_pos=True,
 		additional_head_elements=[]
@@ -341,6 +354,29 @@ class AttributionHtmlSerializer(object):
 		return head
 
 
+	@classmethod
+	def wrap_as_html_page(
+		cls,
+		body_content,
+		additional_styling='',
+		show_pos=True,
+		additional_head_elements=''
+	):
+		"""
+		Deprecated.  Still used by
+		`validators.crowdflower_task.display.get_results_html()`.
+		"""
+		return (
+			'<html>' 
+			+ cls.get_head_element(
+				additional_styling, show_pos, additional_head_elements
+			).toprettyxml(indent='  ')
+			+ '<body>' + body_content + '</body>'
+			+ '</html>'
+		)
+
+
+
 class Styler(dict):
 
 	def as_element(self):
@@ -365,22 +401,7 @@ class Styler(dict):
 		return string
 
 
-#	def wrap_as_html_page(
-#		self,
-#		body_content,
-#		additional_styling='',
-#		show_pos=True,
-#		additional_head_elements=''
-#	):
-#		return (
-#			'<html>' 
-#			+ self.get_head_element(
-#				additional_styling, show_pos, additional_head_elements) 
-#			+ '<body>' + body_content + '</body>'
-#			+ '</html>'
-#		)
-#
-#
+
 #
 #
 #	def get_attribution_html(self, attribution):
