@@ -192,7 +192,7 @@ all attributions in the file.
 
 Prounoun interpolation in attributions
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Often times a source will contain a pronoun, like "he", "she", or "they".
+Oftentimes a source will contain a pronoun, like "he", "she", or "they".
 These can be automatically substituted with a more informative sequence of
 tokens found using CoreNLPs coreference resolution:
 
@@ -208,7 +208,7 @@ list, and it grafts the replacement into the dependency tree as well.  So this
 brings about a relatively full substitution.
 
 One important side effect, though, is that the token ``'id'``\ s in the
-interpolated sentence will no longer be consecutive sentence, nor unique.
+interpolated sentence will no longer be consecutive, nor unique.
 
 
 Creating New Attributions
