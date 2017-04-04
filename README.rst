@@ -190,6 +190,32 @@ all attributions in the file.
     wsj_0018_Attribution_relation_level.xml_set_9
     wsj_0018_Attribution_relation_level.xml_set_7
 
+Prounoun interpolation in attributions
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Often times a source will contain a pronoun, like "he", "she", or "they".
+These can be automatically substituted with a more informative sequence of
+tokens found using CoreNLPs coreference resolution:
+
+.. code-block:: python
+
+    >>> article.attributions['some-attribution-id'].interpolate_source_pronouns()
+
+Doing this will find the "representative" mention corresponding to any pronouns
+in the attribution's source, and will use it to replace the pronouns.  Doing
+this has a few effects.  First, and most obviously, the pronouns are replaced
+in the sequence of tokens found in the attribution's source.  This also affects
+the sentence in which the pronoun was found -- that sentence's tokens list also
+receives the substitution.  And finally, the dependency tree in which the
+pronoun was found is also modified, by grafting in the tokens for the
+representative mention, in place of the pronoun token(s).  This makes a
+relatively full substitution, so it is almost as if the original document were
+written with the representative mention in place of the pronoun.  
+
+There is at least one key differences though.  The token ids in a sentence in
+which a replacement has taken place will no longer be consecutive nor unique,
+because the grafted tokens keep their original token ids.
+
+
 Creating New Attributions
 -------------------------
 As mentioned above, it is possible to create a ``ParcCorenlpReader`` without

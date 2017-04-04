@@ -53,6 +53,15 @@ class Attribution(dict):
 					+ sentence['tokens'][token_idx+1:]
 				)
 
+				# Now alter the substitute tokens to make them seem like they
+				# really came from this sentence
+				for sub_token in substitute_tokens:
+					sub_token['sentence_id'] = token['sentence_id']
+					sub_token['attribution'] = self
+					sub_token['role'] = 'source'
+
+		self['source'] = new_source
+
 
 	def get_token_substitution(self, token):
 
@@ -159,7 +168,7 @@ def clone_tree(tokens):
 	clone_lookup = {}
 	for token in tokens:
 		clone = Token(token)
-		clone['word'] = 'clone-' + clone['word']
+		#clone['word'] = 'clone-' + clone['word'] # debug: keep track of clone
 		clone_lookup[token['id']] = clone
 
 	# Now we go through the dependency tree structure, and make all pointers in
