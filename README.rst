@@ -201,19 +201,14 @@ tokens found using CoreNLPs coreference resolution:
     >>> article.attributions['some-attribution-id'].interpolate_source_pronouns()
 
 Doing this will find the "representative" mention corresponding to any pronouns
-in the attribution's source, and will use it to replace the pronouns.  Doing
-this has a few effects.  First, and most obviously, the pronouns are replaced
-in the sequence of tokens found in the attribution's source.  This also affects
-the sentence in which the pronoun was found -- that sentence's tokens list also
-receives the substitution.  And finally, the dependency tree in which the
-pronoun was found is also modified, by grafting in the tokens for the
-representative mention, in place of the pronoun token(s).  This makes a
-relatively full substitution, so it is almost as if the original document were
-written with the representative mention in place of the pronoun.  
+in the attribution's source, and will use it to replace the pronouns.  It will
+have a few effects, aside from just replacing the pronouns in the attribution's
+``'source'`` token list. It also replaces the pronouns in the sentence's token
+list, and it grafts the replacement into the dependency tree as well.  So this
+brings about a relatively full substitution.
 
-There is at least one key differences though.  The token ids in a sentence in
-which a replacement has taken place will no longer be consecutive nor unique,
-because the grafted tokens keep their original token ids.
+One important side effect, though, is that the token ``'id'``\ s in the
+interpolated sentence will no longer be consecutive sentence, nor unique.
 
 
 Creating New Attributions
