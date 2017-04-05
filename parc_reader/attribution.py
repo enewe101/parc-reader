@@ -24,6 +24,7 @@ class Attribution(dict):
 			# If the token is not a preposition, copy it over unchanged 
 			if token['pos'] != 'PRP':
 				new_source.append(token)
+				continue
 
 			# Try to find substitution tokens to replace the pronoun.
 			# If none are found, then simply copy over the token unchanged.
@@ -34,7 +35,7 @@ class Attribution(dict):
 			# If we did find a replacement, then put it in place of the
 			# original.  Graft it into the source sequence, sentence sequence,
 			# and dependency tree structure
-			if substitute_tokens is not None:
+			else:
 
 				new_source.extend(substitute_tokens)
 
@@ -103,6 +104,7 @@ class Attribution(dict):
 		"""
 		return id(self) == id(other)
 
+
 	def __ne__(self, other):
 		return not self.__eq__(other)
 
@@ -113,7 +115,7 @@ def graft_to_dependency_tree(token, substitute_token):
 	by substitute token.  Dependency links are two-way (the parent has a
 	pointer to the child, and the child to the parent).  So grafting involves
 	adding pointers from original token's neighbors to to the substitute, in 
-	addition to adding pointers from the substitute to the original parent's 
+	addition to adding pointers from the substitute to the original token's 
 	neighbors.
 	"""
 
@@ -152,7 +154,7 @@ def graft_to_dependency_tree(token, substitute_token):
 			if child_token['id'] == token['id']:
 				new_parent_children.append((relation, substitute_token))
 			else:
-				new_parent_children.append((relaiton, child_token))
+				new_parent_children.append((relation, child_token))
 
 		parent_token['children'] = new_parent_children
 
