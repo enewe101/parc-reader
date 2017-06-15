@@ -38,6 +38,7 @@ class ParcAnnotatedText(object):
 				{'tokens':[], 'attributions':{}}
 			)
 			self.sentences.append(sentence)
+
 			word_tags = sentence_tag.find_all('word')
 			current_attribution_spans = {}
 			attribution_priority = IncMap()
@@ -65,6 +66,7 @@ class ParcAnnotatedText(object):
 					# one attribution to "own" a token.  We can also
 					# pre-emptively eliminated attributions explicitly 
 					# flagged as nested
+                    # NOTE: Should be qualified by ``if not include_nested``...
 					if 'Nested' in _id:
 						continue
 					viable_attributions.append(_id)
