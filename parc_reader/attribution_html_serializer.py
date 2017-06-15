@@ -77,7 +77,6 @@ class AttributionHtmlSerializer(object):
         for token in tokens:
 
             roles = cls.get_token_roles(token, attribution)
-            print roles
 
             # Here we can optionally detect and resolve pronouns
             if resolve_pronouns and role == 'source':
