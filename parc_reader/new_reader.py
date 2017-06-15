@@ -95,11 +95,9 @@ class ParcCorenlpReader(object):
             # and word tags)
             root_sentence_xml_tag = doc.createElement('SENTENCE')
             root_sentence_xml_tag.setAttribute('gorn', str(gorn))
-            sentence_xml_tag, word, sentence_word = (
-                self.create_sentence_tag(
-                    doc, sentence_constituent, word=word, 
-                    sentence_word=sentence_word, gorn_trail=(), gorn=gorn
-                )
+            sentence_xml_tag, word, sentence_word = self.create_sentence_tag(
+                doc, sentence_constituent, word=word, 
+                sentence_word=sentence_word, gorn_trail=(), gorn=gorn
             )
             root_sentence_xml_tag.appendChild(sentence_xml_tag)
             gorn += 1
@@ -142,16 +140,18 @@ class ParcCorenlpReader(object):
             word += 1
             sentence_word += 1
 
-            if constituent['attribution'] is not None:
-                attribution = doc.createElement('attribution')
-                attribution.setAttribute(
-                    'id', constituent['attribution']['id']
-                )
-                attribution_role = doc.createElement('attributionRole')
-                attribution_role.setAttribute(
-                    'roleValue', constituent['role'])
-                attribution.appendChild(attribution_role)
-                element.appendChild(attribution)
+            # A token can be involved in multiple attributions
+            for attr_id in constituent['attributions']:
+
+                attribution = element.appendChild(
+                    doc.createElement('attribution'))
+                attribution.setAttribute('id', attr_id)
+
+                # A token can have multiple roles for a given attribution
+                for role in constituent['attributions'][attr_id]:
+                    attribution_role = attribution.appendChild(
+                        doc.createElement('attributionRole'))
+                    attribution_role.setAttribute('roleValue', role)
 
             return element, word, sentence_word
 
@@ -422,11 +422,11 @@ class ParcCorenlpReader(object):
         # a reference to the attribution and gets labelled with the 
         # correct role.  We also ensure that each sentence involved
         # in the attribution gets a reference to the attribution
-        self.add_to_attribution(new_attribution, 'cue', cue_tokens)
-        self.add_to_attribution(new_attribution, 'content', content_tokens)
-        self.add_to_attribution(new_attribution, 'source', source_tokens)
+        self.add_to_attribution(attribution_id, 'cue', cue_tokens)
+        self.add_to_attribution(attribution_id, 'content', content_tokens)
+        self.add_to_attribution(attribution_id, 'source', source_tokens)
 
-        return new_attribution
+        return attribution_id
 
 
     def resolve_token(self, token_spec):
@@ -460,12 +460,12 @@ class ParcCorenlpReader(object):
         # Resolve the tokens, ensuring that they are tokens belonging to
         # this reader, and not some other reader.
         resolved_tokens = []
-        sentences_ids = set()
+        sentence_ids = set()
         for token in tokens:
 
             sentence_id, token = self.resolve_token(token)
-            attribution['role'].append(token)
-            sentences_ids.add(sentence_id)
+            attribution[role].append(token)
+            sentence_ids.add(sentence_id)
 
             try:
                 token['attributions'][attribution_id].add(role)
@@ -504,5 +504,4 @@ class ParcCorenlpReader(object):
                     except KeyError:
                         token['attributions'][attr_id] = set([role])
                     attribution[role].append(token)
-
 

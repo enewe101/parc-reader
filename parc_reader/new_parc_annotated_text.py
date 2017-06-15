@@ -34,8 +34,10 @@ def get_attributions(parc_xml, include_nested=True):
 
                 # Note this token's role in the attribution, and note this
                 # sentence's involvment in the attribution.
-                role = attribution_tag.find('attributionrole')['rolevalue']
-                attribution[role].append((sentence_id, word_id))
-                attribution['sentences'].add(sentence_id)
+                role_tags = attribution_tag.find_all('attributionrole')
+                roles = [role_tag['rolevalue'] for role_tag in role_tags]
+                for role in roles:
+                    attribution[role].append((sentence_id, word_id))
+                    attribution['sentences'].add(sentence_id)
 
     return attributions
