@@ -5,7 +5,7 @@ from collections import defaultdict
 ROLES = {'cue', 'content', 'source'}
 
 
-def get_attributions(parc_xml, include_nested=True):
+def get_attributions(parc_xml, include_nested=False):
 
     # Our main concern is to build attributions, including their 
     # associations to tokens and sentences
@@ -26,7 +26,7 @@ def get_attributions(parc_xml, include_nested=True):
             for attribution_tag in attribution_tags:
 
                 # Include nested attributions only if desired
-                if not include_nested and 'Nested' in _id:
+                if not include_nested and 'Nested' in attribution_tag['id']:
                     continue
 
                 # Get / create an attribution object for this attribution

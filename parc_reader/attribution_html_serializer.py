@@ -54,6 +54,7 @@ class AttributionHtmlSerializer(object):
         return attribution_element.toprettyxml(indent=indent, newl=newl)
 
 
+
     @classmethod
     def get_attribution_element(cls, attribution, resolve_pronouns=False):
 
@@ -61,18 +62,35 @@ class AttributionHtmlSerializer(object):
         cue_head = cls.get_cue_head(attribution)
         source_head = cls.get_source_head(attribution)
 
-        # Group together tokens that are part of the same attribution role
-        token_groups = cls.group_tokens(attribution)
-
         # Make an element to contain the markup for this attribution
         attribution_element = div({'class':'attribution'})
 
-        # Populate it with markup for all the tokens in this attribution
-        for token_group in token_groups:
-            token_group_element = cls.make_token_group_element(
-                token_group, resolve_pronouns, cue_head, source_head
-            )
-            attribution_element.appendChild(token_group_element)
+        # Get the sentences involved in the attribution, and get all their
+        # tokens.
+        sentences = cls.get_sentences(attribution)
+        tokens = []
+        for sentence in sentences:
+            tokens += sentence['tokens']
+
+        # Make html representation for each token, adding it to the attribution
+        # element
+        for token in tokens:
+
+            roles = cls.get_token_roles(token, attribution)
+            print roles
+
+            # Here we can optionally detect and resolve pronouns
+            if resolve_pronouns and role == 'source':
+                if is_substitutable_pronoun(token):
+                    resolved_element = cls.make_resolved_element(
+                        token, roles, cue_head, source_head)
+                    attribution_element.appendChild(resolved_element)
+
+            # But usually we just make the element for each token
+            else:
+                token_element = cls.make_token_element(
+                    token, roles, cue_head, source_head)
+                attribution_element.appendChild(token_element)
 
         return attribution_element
 
@@ -122,11 +140,14 @@ class AttributionHtmlSerializer(object):
 
 
     @staticmethod
-    def make_token_element(token, cue_head=None, source_head=None):
+    def make_token_element(token, roles, cue_head=None, source_head=None):
 
         # check if element is the cue head or source head, and adjust 
         # token element's class accordingly
-        attrs = {'class':'token'}
+        _class = 'token'
+        if len(roles) > 0:
+            _class += ' ' + ' '.join(['role-%s' % role for role in roles])
+        attrs = {'class':_class}
         if token is cue_head:
             attrs['class'] += ' cue-head'
         elif token is source_head:
@@ -143,7 +164,9 @@ class AttributionHtmlSerializer(object):
 
 
     @classmethod
-    def make_resolved_element(cls, token, cue_head=None, source_head=None):
+    def make_resolved_element(
+        cls, token, roles, cue_head=None, source_head=None
+    ):
 
         # Get the representative mention for the token, if any
         resolved_tokens = cls.substitute_pronoun_token(token)
@@ -155,12 +178,13 @@ class AttributionHtmlSerializer(object):
             resolved_element = span({'class':'pronoun'})
             for resolved_token in resolved_tokens:
                 token_element = cls.make_token_element(
-                    resolved_token, cue_head, source_head)
+                    resolved_token, roles, cue_head, source_head)
                 resolved_element.appendChild(token_element)
 
         # Otherwise, just get the element for the original token
         else:
-            resolved_element = cls.make_token_element(token)
+            resolved_element = cls.make_token_element(
+                token, roles, cue_head, source_head)
 
         # Return the element, whether reprsenting replacement or original
         return resolved_element
@@ -214,7 +238,7 @@ class AttributionHtmlSerializer(object):
         for token in tokens:
 
             # Get this token's role relative to the focal attribution
-            role = cls.get_token_role(token, attribution)
+            role = cls.get_token_roles(token, attribution)
 
             # Was there a role-change?
             if role != prev_role:
@@ -238,23 +262,16 @@ class AttributionHtmlSerializer(object):
 
 
     @staticmethod
-    def get_token_role(token, attribution):
+    def get_token_roles(token, attribution):
         """
-        Return the role ('soure' | 'cue' | 'content') of the token 
-        relative to the given attribution.
+        Return the set of roles that this token has with respect to the
+        supplied attribution.  Ignore roles relating to other attributions.
         """
-
-        # If the token is not actually part of an attribution (it is just
-        # a token in the same sentence as one) then it has no role.
-        if 'attribution' not in token or token['attribution'] is None:
-            return None
-
-        # Ignore roles for the tokens in other attributions
-        if token['attribution']['id'] != attribution['id']:
-            return None
-
-        # Normally just return the token's role
-        return token['role']
+        attr_id = attribution['id']
+        if attr_id in token['attributions']:
+            return token['attributions'][attr_id]
+        else:
+            return set()
 
 
     @staticmethod
