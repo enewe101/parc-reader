@@ -1,4 +1,4 @@
-from collections import OrderedDict
+from collections import defaultdict
 from xml.dom import minidom
 from parc_reader.utils import get_spans
 from parc_reader.attribution import Attribution
@@ -6,7 +6,7 @@ from corenlp_xml_reader.annotated_text import (
     AnnotatedText as CorenlpAnnotatedText, Token
 )
 from attribution_html_serializer import AttributionHtmlSerializer
-from parc_reader.parc_annotated_text import ParcAnnotatedText
+from parc_reader.new_parc_annotated_text import get_attributions
 import re
 
 
@@ -34,26 +34,19 @@ class ParcCorenlpReader(object):
             corenlp_xml, aida_json, **corenlp_options
         )
 
-        # Construct the parc datastructure if parc_xml was supplied
-        self.parc = None
+        # This is essentially a monkey patch of the corenlp object.  We take
+        # it's sentences.  Add an empty placeholders the sentences and tokens
+        # for the (possible) attributions that they are associated to.
+        self.attributions = {}
+        self.sentences = self.core.sentences
+        for sentence in self.sentences:
+            sentence['attributions'] = set()
+            for token in sentence['tokens']:
+                token['attributions'] = {}
+
+        # Get attribution information from the parc file now (if provided)
         if parc_xml is not None:
-            self.parc = ParcAnnotatedText(
-                parc_xml, include_nested=False,
-                **parc_options
-            )
-
-        # Align the datastructures
-        self.sentences = []
-
-        # If we have a parc datastructure, we'll merge it with the corenlp
-        # datastructure now
-        if self.parc is not None:
-            self.merge()
-
-        # Otherwise, we'll just put placeholders for parc properties in
-        # the corenlp datastructure
-        else:
-            self.blank_merge()
+            self.merge(parc_xml)
 
         # Determine where paragraph breaks should go
         if self.raw_txt is not None:
@@ -308,9 +301,7 @@ class ParcCorenlpReader(object):
                 # it's not the head!
                 try:
 
-                    token_ids = [
-                        (t['sentence_id'], t['id']) for t in tokens
-                    ]
+                    token_ids = [(t['sentence_id'], t['id']) for t in tokens]
 
                     has_parent_in_span = any([
                         (t[1]['sentence_id'], t[1]['id'])
@@ -341,6 +332,18 @@ class ParcCorenlpReader(object):
 
 
     def get_attribution_id(self, id_formatter):
+        """
+        Gets a new, unique attribution id, incrementing as much as needed for
+        the id to actually be unique.
+        """
+        while True:
+            attribution_id = self._get_attribution_id(id_formatter)
+            if attribution_id not in self.attributions:
+                break
+        return attribution_id
+
+
+    def _get_attribution_id(self, id_formatter):
         '''
         Provides an attribution id that is guaranteed to be unique
         within object instances using an incrementing integer.  The integer
@@ -396,52 +399,23 @@ class ParcCorenlpReader(object):
         either a list of token objects, or a list of (sentence_ID, token_ID)
         tuples.  If token objects are provided, then will be converted into
         (sentence_ID, token_ID) tuples.  This allows the token id to be looked
-        up on the reader object itself, this handles the case where one has
-        opened two separarate copies of "the same" article, and one attempts
-        to add tokens from one article into the attribution of another -- 
-        it would still work, but would in fact always add tokens that come from
-        the same reader as the attribution.  This is important because links
-        from the tokens themselves are made to the attribution, and are relied
-        upon in the functioning of the class.
+        up on the reader object itself. So, in case the tokens actually come
+        from a different copy (different reader object) opened for the same
+        article, the matching token objects from this reader will be the ones
+        included in the attribution.
         '''
 
-        # If no id was supplied, make one
+        # Work out the attribution id, and ensure it is in fact unique.
         if attribution_id is None:
-
-            # Ensure the id is unique
-            while True:
-                attribution_id = self.get_attribution_id(id_formatter)
-                if attribution_id not in self.attributions:
-                    break
-
+            attribution_id = self.get_attribution_id(id_formatter)
         if attribution_id in self.attributions:
             raise ValueError(
                 'The attribution_id supplied is already in use: %s'
                 % attribution_id
             )
 
-        # Before proceeding, make sure that none of the tokens are already
-        # part of an attribution.  This class currently doesn't support
-        # tokens being part of multiple (i.e. nested) attributions
-        tokens = cue_tokens + content_tokens + source_tokens
-        for token in tokens:
-            if (
-                token['role'] is not None 
-                or token['attribution'] is not None
-            ):
-                raise ValueError(
-                    'Token(s) supplied for the attribution are already '
-                    'part of another attribution:\n' + str(token)
-                )
-
-        # Make a new empty attribution having correct id
-        new_attribution = Attribution(self, {
-            'id':attribution_id, 'cue':[], 'content':[], 'source':[]
-        })
-
-        print new_attribution['id']
-
-        # Put a reference in the global attributions list
+        # Make a new empty attribution, and place it on the global attributions
+        new_attribution = Attribution(self, attribution_id)
         self.attributions[attribution_id] = new_attribution
 
         # Ensure each of the tokens involved in the attribution gets
@@ -455,158 +429,80 @@ class ParcCorenlpReader(object):
         return new_attribution
 
 
+    def resolve_token(self, token_spec):
+        """
+        Returns the actual token object, and the sentence that contains it
+        based on the ``token_spec``.  The token spec can either be a token 
+        object itself, or a (sentnece_id, token_id) pair.
+        """
+
+        # Get the sentence_id and token id, regardless of whether an actual
+        # token object was passed
+        if isinstance(token_spec, tuple):
+            sentence_id, token_id = token_spec
+        elif isinstance(token_spec, Token):
+            sentence_id, token_id = token_spec['sentence_id'], token_spec['id']
+
+        # Look up the token on this reader
+        token = self.sentences[sentence_id]['tokens'][token_id]
+
+        # Return the sentence id and the token object
+        return sentence_id, token
+
+
     # TODO: does this prevent overlapping attibutions, like the way
     #    `add_attribution` does?
-    def add_to_attribution(self, attribution, role, tokens):
-        '''
-        Add the given tokens to the given attribution using the given
-        role (which should be 'cue', 'content', or 'source'. 
+    def add_to_attribution(self, attribution_id, role, tokens):
 
-        Note that `cue_tokens`, `source_tokens`, and `content_tokens` can be
-        either a list of token objects, or a list of (sentence_ID, token_ID)
-        tuples.  If token objects are provided, then will be converted into
-        (sentence_ID, token_ID) tuples.  This allows the token id to be looked
-        up on the reader object itself, this handles the case where one has
-        opened two separarate copies of "the same" article, and one attempts
-        to add tokens from one article into the attribution of another -- 
-        it would still work, but would in fact always add tokens that come from
-        the same reader as the attribution.  This is important because links
-        from the tokens themselves are made to the attribution, and are relied
-        upon in the functioning of the class.
-        '''
-
-        # Verify that the attribution is actually an Attribution
-        if not isinstance(attribution, Attribution):
-            raise ValueError(
-                'supplied attribution must be of type Attribution.')
+        # Get the attribution
+        attribution = self.attributions[attribution_id]
 
         # Resolve the tokens, ensuring that they are tokens belonging to
         # this reader, and not some other reader.
         resolved_tokens = []
+        sentences_ids = set()
         for token in tokens:
 
-            # Which sentence and token ID addresses this token?
-            if isinstance(token, tuple):
-                sentence_id, token_id = token
-            elif isinstance(token, Token):
-                sentence_id, token_id = token['sentence_id'], token['id']
+            sentence_id, token = self.resolve_token(token)
+            attribution['role'].append(token)
+            sentences_ids.add(sentence_id)
 
-            # Get that token from this reader.
-            resolved_tokens.append(
-                self.sentences[sentence_id]['tokens'][token_id])
+            try:
+                token['attributions'][attribution_id].add(role)
+            except KeyError:
+                token['attributions'][attribution_id] = set([role])
 
-        # We'll go through each token, ensuring it has a reference to the
-        # attribution and knows its role.  At the same time, we'll 
-        # accumulate references to the sentence(s) they belong to (normally
-        # just one sentence, but sometimes multiple).
-        sentence_ids = set()
-        for token in resolved_tokens:
-
-            # Verify that the tokens are actually Tokens
-            if not isinstance(token, Token):
-                raise ValueError(
-                    '`tokens` must be an iterable of objects of type '
-                    'Token.'
-                )
-
-            # Copy the role and attribution onto the token
-            token['role'] = role
-            token['attribution'] = attribution
-            sentence_ids.add(token['sentence_id'])
-
-            # Copy the token to the attribution
-            attribution[role].append(token)
-
-        # Now ensure each sentence has a reference to the attribution
-        attribution_id = attribution['id']
-        for sentence_id in sentence_ids:
-            sentence = self.sentences[sentence_id]
-            sentence['attributions'][attribution_id] = attribution
+        for sentence in (self.sentences[sid] for sid in sentence_ids):
+            sentence['attributions'].add(attribution_id)
 
 
-    def blank_merge(self):
-        '''
-        This is called instead of merge when there is no parc datastructure
-        to be merged with the corenlp datastructure.  Instead, it just
-        adds the parc properties into the datastructure, filling them 
-        with None's and empty dictionaries.  This makes it possible to
-        add new attributions to the datastructure.
-        '''
-        self.attributions = {}
-        for sentence in self.core.sentences:
-            self.sentences.append(sentence)
-            sentence['attributions'] = {}
-            for token in sentence['tokens']:
-                token['role'] = None
-                token['attribution'] = None
-
-
-    def merge(self):
+    def merge(self, parc_xml):
         '''
         This merges information from CoreNLP with information from the
         Parc annotations, while assuming that they have identical 
         tokenization and sentence spliting (which makes alignment trivial).
         '''
-        self.attributions = OrderedDict()
-        aligned_sentences = zip(self.core.sentences, self.parc.sentences)
-        for core_sentence, parc_sentence in aligned_sentences:
+        attributions = get_attributions(parc_xml)
+        for attr_id, attribution_spec in attributions.iteritems():
 
-            # We'll build the aligned sentence off the corenlp sentence
-            self.sentences.append(core_sentence)
-            core_sentence['attributions'] = {}
+            # Create an attribution object that will store references to the
+            # actual tokens involved.
+            attribution = Attribution(self, attr_id)
+            self.attributions[attr_id] = attribution
 
-            # Gather the attributions that exist on this sentence
-            for attribution in parc_sentence['attributions']:
+            # Associate sentences involved with this attribution.
+            for sentence_id in attribution_spec['sentences']:
+                self.sentences[sentence_id]['attributions'].add(attr_id)
 
-                _id = attribution['id']
-
-                # It's possible that attributions span multiple sentences,
-                # so if we've seen this attribution in a previous sentence,
-                # get a reference to it
-                if _id in self.attributions:
-                    new_attribution = self.attributions[_id]
-
-                # Otherwise build the attribution, and add it to the global
-                # list of attributions for the article.
-                else:
-                    new_attribution = Attribution(self, {
-                        'id':_id, 'content':[], 'cue':[], 'source':[]
-                    })
-                    self.attributions[_id] = new_attribution
-
-                # Add the attribution to the list for this sentence
-                core_sentence['attributions'][_id] = new_attribution
-
-                # Populate the attribution spans with actual 
-                # tokens (they are currently just index ranges).  We'll
-                # populate them with corenlp's tokens
-                for role in ROLES:
-
-                    # replace attribution index spans with actual
-                    # tokens
-                    new_attribution[role].extend(get_spans(
-                        core_sentence, attribution[role], 
-                        elipsis=False
-                    ))
-
-            # We'll merge information from parc tokens onto core_nlp tokens
-            aligned_tokens = zip(
-                core_sentence['tokens'], parc_sentence['tokens']
-            )
-
-            # Specifically, we'll copy attribution membership information 
-            # from parc tokens onto core_tokens.
-            for core_token, parc_token in aligned_tokens:
-                if 'attribution_id' in parc_token:
-                    _id = parc_token['attribution_id']
-                    core_token['attribution'] = (
-                        core_sentence['attributions'][_id])
-                    core_token['role'] = parc_token['role']
-                else:
-                    core_token['attribution'] = None
-                    core_token['role'] = None
-
-
-
+            # Note onto the token it's role(s) in this attribution
+            # and make references from the attribution to the tokens.
+            for role in ROLES:
+                for sentence_id, token_id in attribution_spec[role]:
+                    token = self.sentences[sentence_id]['tokens'][token_id]
+                    try:
+                        token['attributions'][attr_id].add(role)
+                    except KeyError:
+                        token['attributions'][attr_id] = set([role])
+                    attribution[role].append(token)
 
 

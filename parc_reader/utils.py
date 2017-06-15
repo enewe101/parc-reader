@@ -61,9 +61,9 @@ class IncrementingMap(dict):
 
 	def _get_keys(self):
 		'''
-		This getter is private, and covers the case where self._keys is not 
-		yet defined.  The first time it is called, self._keys is initialized
-		to be an empty list.
+                This getter is private, and covers the case where self._keys is
+                not yet defined.  The first time it is called, self._keys is
+                initialized to be an empty list.
 		'''
 		try:
 			return self._keys
