@@ -41,3 +41,68 @@ def get_attributions(parc_xml, include_nested=False):
                     attribution['sentences'].add(sentence_id)
 
     return attributions
+
+
+
+def get_attributions_from_brat(annotation_text):
+    """
+    Reads attributions from a BRAT annotation file.  This is a different format
+    than the PARC format, but it holds pretty much the same information
+    """
+
+    # Our main concern is to build attributions, including their 
+    # associations to tokens and sentences
+    attributions = defaultdict(
+        lambda: {'sentences':set(), 'source':[],'cue':[],'content':[]}
+    )
+
+    attribution_specs = {}
+    span_specs = {}
+    for line in annotation_text.split('\n'):
+
+        # Skip blank lines
+        if line == '': continue
+
+        # Every entry has a label, followed by a specification
+        label, spec = line.split('\t', 1)
+
+        # Labels starting with 'E' represent attributions, and they collect
+        # multiple spans together
+        if label.startswith('E'):
+
+            # The attribution spec has several role:label words separated by 
+            # spaces.  The "Source", "Cue", and "Content" roles are of interest
+            # but the "Attribution" role is redundant so we filter it out.
+            attribution = dict([
+                s.split(':') for s in spec.split()
+                if 'Attribution' not in s.split(':')[0]
+            ])
+            attribution_specs[label] = attribution
+
+        # Labels starting with 'T' represent spans
+        elif label.startswith('T'):
+
+            # The span's spec consists of a role and range spec separated by a
+            # tab from a listing of the tokens under that range.  We don't want
+            # the token literals, just the role and range spec.
+            role_and_range_specs = spec.split('\t')[0]
+            role, range_specs = role_and_range_specs.split(' ', 1)
+
+            # The ranges are like `start end:start end:...`
+            # Separate individual ranges, parse out the start and endpoint for 
+            # each (converting them to ints)
+            ranges = [
+                tuple([int(i) for i in r.split(' ')]) 
+                for r in range_specs.split(';')
+            ]
+            span_specs[label] = ranges
+
+    # Within attribution specs, replace the span identifier with the range spec
+    # for the span.
+    finalized_attribution_specs = {
+        label: {key.lower(): span_specs[attr_spec[key]] for key in attr_spec}
+        for label, attr_spec in attribution_specs.iteritems()
+    }
+
+    return finalized_attribution_specs
+

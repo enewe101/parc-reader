@@ -6,7 +6,8 @@ from corenlp_xml_reader.annotated_text import (
     AnnotatedText as CorenlpAnnotatedText, Token
 )
 from attribution_html_serializer import AttributionHtmlSerializer
-from parc_reader.new_parc_annotated_text import get_attributions
+from parc_reader.new_parc_annotated_text import (
+    get_attributions, get_attributions_from_brat)
 import re
 
 
@@ -21,6 +22,7 @@ class ParcCorenlpReader(object):
         corenlp_xml, 
         parc_xml=None, 
         raw_txt=None,
+        brat_path=None,
         aida_json=None, 
         corenlp_options={},
         parc_options={}
@@ -46,7 +48,10 @@ class ParcCorenlpReader(object):
 
         # Get attribution information from the parc file now (if provided)
         if parc_xml is not None:
-            self.merge(parc_xml)
+            self.merge_parc(parc_xml)
+
+        if brat_path is not None:
+            self.merge_brat(brat_path)
 
         # Determine where paragraph breaks should go
         if self.raw_txt is not None:
@@ -476,13 +481,77 @@ class ParcCorenlpReader(object):
             sentence['attributions'].add(attribution_id)
 
 
-    def merge(self, parc_xml):
+    def map_byte_range_to_tokens(self, start, end):
+        """
+        Given a start byte and end byte, collect the corresponding list of
+        (sentence_id, token_id) tuples.
+        """
+        pointer = start
+        tokens = []
+        while pointer < end:
+
+            # Get the next token.  If we turn up nothing, move the pointer
+            # forward one byte.
+            try:
+                cur_token = self.core.tokens_by_offset[pointer]
+            except KeyError:
+                pointer += 1
+                continue
+
+            # Add the found token to the list, and advance to pointer to the
+            # end of that token
+            tokens.append(cur_token)
+            pointer = cur_token['character_offset_end']
+
+        return tokens
+
+
+    def map_byte_range_to_token_ids(self, start, end):
+        tokens = self.map_byte_range_to_tokens(start, end)
+        return [(t['sentence_id'], t['id']) for t in tokens]
+        
+
+    def merge_brat(self, brat_path):
+        """
+        This merges information from CoreNLP with information from the
+        BRAT annotations, while assuming that they have identical 
+        byte offsets for the words.
+        """
+        attributions = self.get_brat_attributions(open(brat_path).read())
+        self.merge(attributions)
+
+
+    def get_brat_attributions(self, brat_text):
+        # Get a representation of the annotations in the brat file
+        attribution_specs = get_attributions_from_brat(brat_text)
+
+        # Convert the byte ranges in the attribution specs into token_id lists
+        attributions = {}
+        for attr_label, attr_spec in attribution_specs.iteritems():
+            new_attribution = {'sentences':set()}
+            attributions[attr_label] = new_attribution
+            for role in attr_spec:
+                new_attribution[role] = []
+                for range_spec in attr_spec[role]:
+                    token_ids = self.map_byte_range_to_token_ids(*range_spec)
+                    sentence_ids = [sid for sid, tid in token_ids]
+                    new_attribution[role].extend(token_ids)
+                    new_attribution['sentences'].update(sentence_ids)
+
+        return attributions
+
+
+    def merge_parc(self, parc_xml):
+        attributions = get_attributions(parc_xml)
+        self.merge(attributions)
+
+
+    def merge(self, attributions):
         '''
         This merges information from CoreNLP with information from the
         Parc annotations, while assuming that they have identical 
         tokenization and sentence spliting (which makes alignment trivial).
         '''
-        attributions = get_attributions(parc_xml)
         for attr_id, attribution_spec in attributions.iteritems():
 
             # Create an attribution object that will store references to the
@@ -497,6 +566,8 @@ class ParcCorenlpReader(object):
             # Note onto the token it's role(s) in this attribution
             # and make references from the attribution to the tokens.
             for role in ROLES:
+                # Note it is permitted that the source can be missing
+                if role not in attribution_spec and role=='source': continue
                 for sentence_id, token_id in attribution_spec[role]:
                     token = self.sentences[sentence_id]['tokens'][token_id]
                     try:

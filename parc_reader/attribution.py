@@ -27,7 +27,19 @@ class Attribution(dict):
         return sentence_ids
 
 
+    # TODO: This is a bit sketchy because it replaces the token in the
+    # attribution's source, and it replaces it in the sentence token list, and
+    # it replaces it in the dependency tree, but references to the original
+    # token will still appear elsewhere.  For example, if two different
+    # attributions have the same source, then calling interpolate source
+    # pronouns on one will not replace the pronoun on the other.  I can't think
+    # of a clean way to do the replacement of the token thoroughly throughout
+    # the datasetructure, and I'm not sure if that's desireable...
     def interpolate_source_pronouns(self):
+        """
+        Substitutes pronouns in the attribution source with the representative
+        mention, provided CoreNLP could resolve the pronoun.
+        """
 
         new_source = []
         for token in self['source']:
@@ -58,19 +70,25 @@ class Attribution(dict):
 
                 # Replace the token in the sentence token sequence.
                 sentence = self.document.sentences[token['sentence_id']]
-                token_idx = sentence['tokens'].index(token)
-                sentence['tokens'] = (
-                    sentence['tokens'][:token_idx]
-                    + substitute_tokens
-                    + sentence['tokens'][token_idx+1:]
-                )
+                try:
+                    token_idx = sentence['tokens'].index(token)
+                    sentence['tokens'] = (
+                        sentence['tokens'][:token_idx]
+                        + substitute_tokens
+                        + sentence['tokens'][token_idx+1:]
+                    )
+                    # Now alter the substitute tokens to make them seem like
+                    # they really came from this sentence
+                    for sub_token in substitute_tokens:
+                        sub_token['sentence_id'] = token['sentence_id']
+                        sub_token['attributions'] = token['attributions']
 
-                # Now alter the substitute tokens to make them seem like they
-                # really came from this sentence
-                for sub_token in substitute_tokens:
-                    sub_token['sentence_id'] = token['sentence_id']
-                    sub_token['attribution'] = self
-                    sub_token['role'] = 'source'
+                # In case the source is shared with another attribution and
+                # that token was already replaced in the sentence from a call
+                # to substitute_pronoun_tokens on the other attribution.
+                except ValueError:
+                    pass
+
 
         self['source'] = new_source
 

@@ -7,3 +7,4 @@ dist
 *.swo
 parc_reader/data/test-parc-output-1.xml
 parc_reader/data/test-parc-output-2.xml
+SETTINGS.py
