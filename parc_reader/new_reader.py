@@ -19,16 +19,24 @@ class ParcCorenlpReader(object):
 
     def __init__(
         self, 
-        corenlp_xml, 
+        corenlp_xml=None, 
         parc_xml=None, 
         raw_txt=None,
         brat_path=None,
+        corenlp_path=None,
         aida_json=None, 
         corenlp_options={},
         parc_options={}
     ):
 
-        # Own the raw text and the id prefix
+        # Either corenlp_xml or corenlp_path should be provided
+        if corenlp_xml is None:
+            if corenlp_path is not None:
+                corenlp_xml = open(corenlp_path).read()
+            else:
+                raise ValueError('Provide either corenlp_xml or corenlp_path')
+
+        # Own the raw text
         self.raw_txt = raw_txt
 
         # Construct the corenlp datastructure
@@ -50,10 +58,11 @@ class ParcCorenlpReader(object):
         if parc_xml is not None:
             self.merge_parc(parc_xml)
 
+        # Get attribution information from the Brat file (if provided)
         if brat_path is not None:
             self.merge_brat(brat_path)
 
-        # Determine where paragraph breaks should go
+        # Determine where paragraph breaks should go (if raw text provided)
         if self.raw_txt is not None:
             self.delineate_paragraphs()
 
@@ -566,8 +575,11 @@ class ParcCorenlpReader(object):
             # Note onto the token it's role(s) in this attribution
             # and make references from the attribution to the tokens.
             for role in ROLES:
-                # Note it is permitted that the source can be missing
-                if role not in attribution_spec and role=='source': continue
+
+                # Currently permittin missing roles.  Theoretically only the
+                # source can be missing in a valid attribution relation.
+                if role not in attribution_spec: continue
+
                 for sentence_id, token_id in attribution_spec[role]:
                     token = self.sentences[sentence_id]['tokens'][token_id]
                     try:

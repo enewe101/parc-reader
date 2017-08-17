@@ -321,15 +321,10 @@ class AttributionHtmlSerializer(object):
 
 
     @staticmethod
-    def get_head_element(
+    def get_styles(
         additional_styling={},
         show_pos=True,
-        additional_head_elements=[]
     ):
-
-        # Create a head element, this is what we'll build and return
-        head = element('head')
-
         # Work out styling for part-of-speech tags
         if show_pos:
             pos_style = {
@@ -368,8 +363,21 @@ class AttributionHtmlSerializer(object):
         styles.update(additional_styling)
 
         # Make a style element
-        style_element = Styler(styles).as_element()
-        head.appendChild(style_element)
+        return Styler(styles).as_element()
+
+
+    @classmethod
+    def get_head_element(
+        cls,
+        additional_styling={},
+        show_pos=True,
+        additional_head_elements=[]
+    ):
+
+        # Create a head element, this is what we'll build and return
+        head = element('head')
+
+        head.appendChild(cls.get_styles(additional_styling))
 
         # Apped any additional head elements passed in
         for additional_element in additional_head_elements:

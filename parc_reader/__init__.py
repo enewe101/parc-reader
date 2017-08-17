@@ -6,3 +6,4 @@ from attribution import Attribution
 from attribution_html_serializer import AttributionHtmlSerializer, Styler
 import parc_dataset
 import new_reader
+import align_attributions
