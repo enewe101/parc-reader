@@ -1,8 +1,43 @@
+import itertools as it
 import t4k
 import sys
 import SETTINGS as SETTINGS
 from collections import defaultdict
 import parc_reader
+
+
+class MultiAlignedAttributions(object):
+    """
+    Given N ParcAnnotatedReader instances, align their attributions so
+    that we can score how well they agree.
+
+    This provides access to all of the N*(N-1)/2 comparisons using a uniform
+    addressing system: specifically, it makes the comparison between A and B
+    available as either A compared to B or B compared to A, which are
+    essentially the same, but for which the meaning of precision and recall are
+    flipped.
+    """
+
+    def __init__(self, parc_reader_objects):
+        self.parc_reader_objects = parc_reader_objects
+        self.validate()
+        combos = it.permutations(range(len(parc_reader_objects)), 2)
+        self.aligned = {(i,j): self._align(i,j) for i,j in combos}
+
+    def validate(self):
+        if len(self.parc_reader_objects) < 2:
+            raise ValueError(
+                'you must provide at least two parc reader objects to compare.'
+                ' Got %d' % len(parc_reader_objects)
+            )
+
+    def __getitem__(self, (i,j)):
+        return self.aligned[i,j]
+
+    def _align(self, i, j):
+        reader1 = self.parc_reader_objects[i]
+        reader2 = self.parc_reader_objects[j]
+        return AlignedAttributions(reader1, reader2)
 
 
 class AlignedAttributions(object):
