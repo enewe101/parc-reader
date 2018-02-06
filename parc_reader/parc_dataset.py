@@ -40,6 +40,14 @@ def get_raw_path(article_num):
     return os.path.join(raw_dir, fname)
 
 
+def raw_article_exists(article_num):
+    try:
+        open(get_raw_path(article_num))
+    except IOError:
+        return False
+    return True
+
+
 def get_corenlp_path(article_num):
     fname = get_parc_fname(article_num)
 
