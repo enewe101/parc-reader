@@ -73,5 +73,5 @@ setup(
 		'data/example-parc.xml',
 		'data/example-corenlp.xml',
 	]},
-	install_requires=['bs4', 'corenlp-xml-reader>=0.1.2']
+	install_requires=['bs4', 'corenlp-xml-reader>=0.1.2', 'brat-reader']
 )
