@@ -44,6 +44,7 @@ def get_attributions(parc_xml, include_nested=False):
     return attributions
 
 
+
 def get_attributions_from_brat(annotation_text):
     """
     Reads attributions from a BRAT annotation file.  This is a different format
