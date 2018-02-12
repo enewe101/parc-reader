@@ -48,6 +48,14 @@ def raw_article_exists(article_num):
     return True
 
 
+def corenlp_article_exists(article_num):
+    try:
+        open(get_corenlp_path(article_num))
+    except IOError:
+        return False
+    return True
+
+
 def get_corenlp_path(article_num):
     fname = get_parc_fname(article_num)
 
