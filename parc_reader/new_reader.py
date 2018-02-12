@@ -9,11 +9,12 @@ from attribution_html_serializer import AttributionHtmlSerializer
 from parc_reader.new_parc_annotated_text import (
     get_attributions, get_attributions_from_brat)
 import re
+from bs4 import BeautifulSoup as Soup
 
 
 ROLES = {'cue', 'content', 'source'}
 WHITESPACE_MATCHER = re.compile(r'\s+')
-
+DEFAULT_OFFSET = 9
 
 class ParcCorenlpReader(object):
 
@@ -25,8 +26,10 @@ class ParcCorenlpReader(object):
         brat_path=None,
         corenlp_path=None,
         aida_json=None, 
+        apply_offset=True,
         corenlp_options={},
-        parc_options={}
+        parc_options={},
+        align_to_parc=None
     ):
 
         # Either corenlp_xml or corenlp_path should be provided
@@ -39,7 +42,11 @@ class ParcCorenlpReader(object):
         # Own the raw text
         self.raw_txt = raw_txt
 
-        # Construct the corenlp datastructure
+        # Construct the corenlp datastructure.  Apply the default offset,
+        # unless not desired, or unless a specific offset was provided in
+        # corenlp options.
+        corenlp_options['initial_offset'] = corenlp_options.get(
+            'initial_offset', DEFAULT_OFFSET if apply_offset else 0)
         self.core = CorenlpAnnotatedText(
             corenlp_xml, aida_json, **corenlp_options
         )
@@ -49,10 +56,18 @@ class ParcCorenlpReader(object):
         # for the (possible) attributions that they are associated to.
         self.attributions = {}
         self.sentences = self.core.sentences
+        self.tokens = self.core.tokens
         for sentence in self.sentences:
             sentence['attributions'] = set()
             for token in sentence['tokens']:
                 token['attributions'] = {}
+
+        # If a parc_xml file was provided, either as a source of attributions
+        # or for the expressed purpose of alignment, adopt the tokens'
+        # character offsets from parc
+        align_to_parc = align_to_parc or parc_xml
+        if align_to_parc:
+            self.align_to_parc(align_to_parc)
 
         # Get attribution information from the parc file now (if provided)
         if parc_xml is not None:
@@ -69,6 +84,22 @@ class ParcCorenlpReader(object):
         # Initialize an incrementing integer, used for generating new
         # attribution ids
         self.incrementing_integer = 0
+
+
+    def align_to_parc(self, parc_xml):
+
+        # Iterate through tokens adopting the start-end positions from parc
+        soup = Soup(parc_xml, 'html.parser')
+        zipped_tokens = zip(self.core.tokens, soup.find_all('word'))
+        for core_token, parc_token_tag in zipped_tokens:
+            start, stop = parc_token_tag['bytecount'].split(',')
+            start, stop = int(start), int(stop)
+            core_token['character_offset_begin'] = start
+            core_token['character_offset_end'] = stop
+
+        self.core.refresh_token_offsets()
+
+
 
 
     def get_attribution_html(self, attribution, resolve_pronouns=False):
