@@ -14,7 +14,6 @@ from bs4 import BeautifulSoup as Soup
 
 ROLES = {'cue', 'content', 'source'}
 WHITESPACE_MATCHER = re.compile(r'\s+')
-DEFAULT_OFFSET = 9
 
 class ParcCorenlpReader(object):
 
@@ -42,11 +41,7 @@ class ParcCorenlpReader(object):
         # Own the raw text
         self.raw_txt = raw_txt
 
-        # Construct the corenlp datastructure.  Apply the default offset,
-        # unless not desired, or unless a specific offset was provided in
-        # corenlp options.
-        corenlp_options['initial_offset'] = corenlp_options.get(
-            'initial_offset', DEFAULT_OFFSET if apply_offset else 0)
+        # Construct the corenlp datastructure.  
         self.core = CorenlpAnnotatedText(
             corenlp_xml, aida_json, **corenlp_options
         )

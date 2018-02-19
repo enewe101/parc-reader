@@ -26,6 +26,8 @@ class BratAnnotation(object):
 
         self.convert_span_identifiers_to_range_spec()
 
+    
+
 
     def parse_attribution(self, attr_label, spec):
         self.attributions[attr_label] = {}
