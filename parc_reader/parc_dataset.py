@@ -100,6 +100,17 @@ def get_parc_path(article_num):
     return os.path.join(parc_dir, subsubdir, fname + '.xml')
 
 
+def load_parc_file(article_num):
+    """
+    Loads a parc file into memory, but does not load the associated corenlp 
+    annotations
+    """
+    return parc_reader.new_parc_annotated_text.read_parc_file(
+        open(get_parc_path(article_num)).read()
+    )
+
+
+
 def load_article(article_num):
 
     parc_xml = open(get_parc_path(article_num)).read()

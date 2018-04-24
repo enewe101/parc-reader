@@ -6,13 +6,136 @@ from brat_reader import BratAnnotatedText
 
 ROLES = {'cue', 'content', 'source'}
 
+def new_annotation():
+    return {'sentences':set(), 'source':[],'cue':[],'content':[]}
+
+
+def read_parc_file(parc_xml, include_nested=False):
+    """
+    This reads in annotation information from parc xml files.  
+    It includes the following annotations:
+
+        (1) tokenizations,
+        (2) sentence splitting,
+        (3) part-of-speech tags,
+        (4) constituent parse tree structure, and
+        (5) attribution relations.
+
+    Because it carries it's own alignment of annotations onto tokens, it
+    can be combined with annotations whose opinion on tokenization differs
+    slightly, as long as some effort to reconcile tokens is made. 
+    """
+    soup = Soup(parc_xml)
+    sentence_tags = soup.find_all('sentence')
+    new_doc = {'sentences':[], 'tokens':[], 'attributions':[]}
+    for sentence_wrapper_tag in sentence_tags:
+        real_sentence_tag = sentence_wrapper_tag.contents[0]
+        sentence_node, attributions = recursively_parse(real_sentence_tag)
+        new_doc['sentences'].append(sentence_node)
+        new_doc['tokens'].extend(sentence_node['tokens'])
+        new_doc['attributions'].extend(attributions)
+
+    return new_doc
+
+
+def recursively_parse(tag):
+
+    # Make sure we're doing the right thing
+    node_type = tag.name.lower()
+    if node_type == 'attribution' or node_type == 'word':
+        raise ValueError(
+            'Expected non-token constituency tag.  Got <%s>.'
+            % tag.name.lower())
+
+    # We're building a constituency parse node from an xml tag.
+    node = {
+        'is_token': False,
+        'constituency_node_type': node_type
+    }
+    node.update(tag.attrs)
+
+    # When we parse the children, they will yield new tokens and attributions
+    # which we also need to capture.
+    node['const_children'] = []
+    node['tokens'] = []
+    attributions = []
+
+    # Parse the children
+    for child_tag in tag.contents:
+
+        # Parse attributions.  Bind them directly to the node and keep as list.
+        if child_tag.name.lower() == 'attribution':
+            print 'this node:', node
+            print 'this tag:', tag
+            raise ValueError(
+                'Got <attribution> tag.  Expecting a constituency tag.')
+
+        elif child_tag.name.lower() == 'word':
+            child_node = parse_token(child_tag)
+            child_attributions = child_node['attributions']
+            node['tokens'].append(child_node)
+
+        else:
+            child_node, child_attributions = recursively_parse(child_tag)
+            node['tokens'].extend(child_node['tokens'])
+
+        node['const_children'].append(child_node)
+        attributions.extend(child_attributions)
+
+    return node, attributions
+
+
+def parse_token(tag):
+    """
+    Base case of the recursive parsing of parc xml.  Parsing of a token.
+    Calls out to a subroutine to parse any attribution information on the token.
+    """
+
+    # Make sure we're doing the right thing
+    tag_name = tag.name.lower()
+    if tag_name != 'word':
+        raise ValueError('Expecting a <word> tag, but got <%s>' % tag_name)
+
+    # We're building a leaf node in the constituency parse; a *token*.
+    node = {'is_token': True}
+    node.update(tag.attrs)
+    node['is_token'] = True
+
+    # Tokens don't have children in the constituency parse, but the attribution
+    # annotations appear as children in the xml.
+    node['attributions'] = []
+
+    # Parse any attribution tags
+    for attr_tag in tag.contents:
+
+        # Parse attributions.  Bind them directly to the node and keep as list.
+        node['attributions'].append(parse_attribution(attr_tag))
+
+    return node
+
+
+def parse_attribution(tag):
+    return {
+        'id': tag['id'],
+        'roles': [role_tag['rolevalue'] for role_tag in tag('attributionrole')]
+    }
+
+
+
 def get_attributions(parc_xml, include_nested=False):
+    """
+    This reads in annotation information from parc xml files.
+    It only takes the attribution relations.  Because it has no intrinsic
+    alignment, it must be combined with another resource that is known to have
+    the same tokenization and sentence-splitting structure.  The CoreNLP
+    annotations do, because the parc files were used to generate pre-tokenized
+    raw text where tokenization is based on spaces and sentences are based on
+    newlines, and the CoreNLP annotations were generated in respect of this.
+    """
 
     # Our main concern is to build attributions, including their 
     # associations to tokens and sentences
-    attributions = defaultdict(
-        lambda: {'sentences':set(), 'source':[],'cue':[],'content':[]}
-    )
+    attributions = defaultdict(new_annotation)
 
     # Parse the xml.
     soup = Soup(parc_xml, 'html.parser')
