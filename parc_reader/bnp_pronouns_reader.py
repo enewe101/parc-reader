@@ -5,6 +5,7 @@ import t4k
 import copy
 import bs4
 
+
 BNP_PRONOUNS_PATH = os.path.join(
     parc_reader.SETTINGS.BNP_DIR, 'data', 'BBN-wsj-pronouns', 'WSJ.pron')
 BNP_SENTENCES_PATH = os.path.join(
@@ -13,49 +14,170 @@ BBN_ENTITY_TYPES_DIR = os.path.join(
     parc_reader.SETTINGS.BNP_DIR, 'data', 'WSJtypes-subtypes')
 
 
+def read_bnp_pronoun_dataset(
+    pronouns_path=BNP_PRONOUNS_PATH,
+    sentences_path=BNP_SENTENCES_PATH,
+    limit=None
+):
 
-def read_bbn_entity_types(entity_types_path=BBN_ENTITY_TYPES_DIR):
+    annotated_docs = {}
+
+    coref_sentences_by_doc = read_coreference_sentences(limit=limit)
+    coreferences_by_doc = read_coreference_annotations(limit=limit)
+    entity_annotated_docs = read_bbn_entity_types(limit=limit)
+    attributions_by_doc = parc_reader.parc_dataset.read_all_parc_files(
+        limit=limit)
+    #print 'Combining annotations from multiple sources...'
+
+    # Choose one of the annotations sources as a list of documents
+    doc_ids = coreferences_by_doc.keys()
+
+    seen_docs = set()
+    for doc_id in doc_ids:
+
+        coref_sentences = coref_sentences_by_doc[doc_id]
+        coreferences, mentions = coreferences_by_doc[doc_id]
+        coref_annotated_doc = make_coreference_annotated_text(
+            coref_sentences['tokens'],
+            coref_sentences['sentences'],
+            coreferences,
+            mentions,
+            doc_id
+        )
+
+        entity_annotated_doc = entity_annotated_docs[doc_id]
+
+        coref_annotated_doc.merge_tokens(
+            entity_annotated_doc,
+            copy_token_fields=['entity'],
+            copy_annotations=['entities']
+        )
+
+        annotated_docs[doc_id] = coref_annotated_doc
+
+        seen_docs.add(doc_id)
+
+    unseen_articles = set(doc_ids) - seen_docs
+    if len(unseen_articles) > 0:
+        print (
+            "Warning: some articles were not included: %s." 
+            % ', '.join(sorted(t4k.strings(unseen_articles)))
+        )
+
+    return annotated_docs
+
+
+
+def make_coreference_annotated_text(
+    tokens,
+    sentences,
+    coreferences,
+    mentions,
+    doc_id
+):
+
+    annotated_doc = AnnotatedDocument(
+        tokens, sentences, 
+        {'coreferences':coreferences, 'mentions': mentions},
+        doc_id=doc_id
+    )
+
+    # Link tokens to any mentions in which they participate
+    for mention_id, mention in mentions.items():
+        for token in annotated_doc.get_tokens(mention['token_span']):
+            try:
+                token['mentions'].append(mention['id'])
+            except KeyError:
+                token['mentions'] = [mention['id']]
+
+        verify_mention_tokens(mention, annotated_doc)
+
+    return annotated_doc
+
+
+def verify_mention_tokens(mention, doc):
+    expected_text = mention['text']
+    found_text = doc.get_tokens(mention['token_span']).text()
+    assert_text_match(expected_text, found_text)
+
+
+
+
+def read_bbn_entity_types(entity_types_path=BBN_ENTITY_TYPES_DIR, limit=None):
     print "Reading BBN entity types.  This will take a minute..."
     annotated_docs = {}
     for path in t4k.ls(entity_types_path):
-        annotated_docs.update(parse_bbn_entity_types_file(open(path).read()))
+
+        annotated_docs.update(
+            parse_bbn_entity_types_file(open(path).read(), limit))
+
+        # Can stop early for debugging purposes
+        doc_id = max(annotated_docs.keys())
+        if limit is not None and doc_id == limit:
+            return annotated_docs
+
     return annotated_docs
 
 
 
-def parse_bbn_entity_types_file(xml_string):
-    xml_doc = bs4.BeautifulSoup(xml_string, 'lxml')
+def parse_bbn_entity_types_file(xml_string, limit=None):
+    xml_tree = bs4.BeautifulSoup(xml_string, 'lxml')
     annotated_docs = {}
-    for doc in xml_doc.find_all('doc'):
-        doc_num = parse_doc_num(doc.find('docno').text.strip())
-        tokens = []
-        annotated_doc = {'tokens':tokens}
-        annotated_docs[doc_num] = annotated_doc
-        for child in doc.contents:
-            if child.name == 'docno':
-                continue
-            if is_text_node(child):
-                tokens.extend(get_text_tokens(child))
-            else:
-                tokens.extend(get_annotated_tokens(child))
+    for doc_tag in xml_tree.find_all('doc'):
+        doc = parse_entity_type_doc(doc_tag)
+
+        if limit is not None and doc.doc_id > limit:
+            return annotated_docs
+
+        annotated_docs[doc.doc_id] = doc
+
     return annotated_docs
 
 
-def get_annotated_tokens(element):
-    annotation = get_annotation(element)
-    return [
-        dict(bbn_entity=annotation, text=text) 
-        for text in element.text.strip().split()
-    ]
 
+def parse_entity_type_doc(doc_tag):
+    doc_id = parse_doc_id(doc_tag.find('docno').text.strip())
+    tokens = []
+    entities = {}
 
-def get_annotation(element):
-    return tuple([element.name] + element['type'].split(':'))
+    for child in doc_tag.contents:
 
+        if child.name == 'docno':
+            continue
 
+        if is_text_node(child):
+            for text in child.strip().split():
+                token = {
+                    'text':text,
+                    'abs_id': len(tokens),
+                    'entity': None
+                }
+                tokens.append(token)
 
-def get_text_tokens(text_element):
-    return [{'text':text} for text in text_element.strip().split()]
+        else:
+            entity = parc_reader.spans.Span({
+                'id': len(entities),
+                'entity_type': tuple([child.name] + child['type'].split(':')),
+                'text': child.text.strip()
+            }, absolute=True)
+            entities[entity['id']] = entity
+
+            token_ids = []
+            for text in entity['text'].split():
+                token = {
+                    'text': text, 
+                    'entity': entity['id'],
+                    'abs_id': len(tokens),
+                }
+                tokens.append(token)
+                token_ids.append(token['abs_id'])
+
+            min_id, max_id = min(token_ids), max(token_ids)
+            entity.add_token_range((min_id, max_id+1))
+
+    return AnnotatedDocument(
+        tokens=tokens, annotations={'entities':entities}, doc_id=doc_id)
+
 
 
 def is_text_node(element):
@@ -65,343 +187,11 @@ def is_text_node(element):
     return element.name is None
 
 
-def read_bnp_pronoun_dataset(
-    pronouns_path=BNP_PRONOUNS_PATH,
-    sentences_path=BNP_SENTENCES_PATH
-):
 
-    dataset = []
-    documents = read_sentences()
-    pronoun_annotations = read_pronouns()
-    entity_types = read_bbn_entity_types()
-    print 'Combining annotations from multiple sources...'
-
-    seen_docs = set()
-    for doc_num, coreferences in pronoun_annotations.items():
-        try:
-            doc = documents[doc_num]
-            entity_type_annotations = entity_types[doc_num]
-        except KeyError:
-            print "skipping doc# %d due to missing annotations" % doc_num
-            continue
-        dataset.append(AnnotatedDocument(
-            doc,
-            doc_num=doc_num,
-            coreferences=coreferences,
-            entity_types=entity_type_annotations
-        ))
-        seen_docs.add(doc_num)
-
-    unseen_articles = set(pronoun_annotations.keys()) - seen_docs
-    if len(unseen_articles) > 0:
-        print (
-            "Warning: some articles were not included: %s." 
-            % ', '.join(sorted(t4k.strings(unseen_articles)))
-        )
-
-    return dataset
-
-
-
-WHITESPACE = re.compile('\s+')
-class AnnotatedDocument(object):
-
-    def __init__(self,
-        doc,
-        doc_num=None,
-        coreferences=None,
-        entity_types=None
-    ):
-        # Left off: about to incorporate entity type annotatios.
-        self.doc_num = doc_num
-        self.initialize_document(doc)
-        self.initialize_coreferences(coreferences)
-        self.initialize_entity_types(entity_types)
-        self.validate_mention_tokens()
-
-
-    def initialize_entity_types(self, entity_types):
-
-        token_pointer = 0
-        for other_token in entity_types['tokens']:
-
-
-            self_token = self.tokens[token_pointer]
-            self_text, other_text = self_token['text'], other_token['text']
-
-            #print self_text, other_text
-
-            # Skip the stray apostraphe in doc 63.
-            if self.doc_num == 63:
-                if self_token['abs_id'] == 291:
-                    continue
-
-            # If they are the same token, merge the annotations
-            if self_text == other_text:
-                self_token.update(other_token)
-
-            # If the new token is a subset of the existing token, split
-            # the existing token
-            elif self_text.startswith(other_text):
-                #print (
-                #    '\t\tdoc #%d, token %d, splitting "%s" into "%s" and "%s"'
-                #    % (
-                #        self.doc_num, self_token['abs_id'], self_text,
-                #        other_text, self_text.split(other_text, 1)[1]
-                #    )
-                #)
-                self_token, remainder = self.split_token(self_token, other_text)
-                self_token.update(other_token)
-
-            else:
-                raise ValueError(
-                    '\t\tdoc #%d, token %d, expecting "%s" got "%s"'
-                    % (self.doc_num,self_token['abs_id'],self_text,other_text)
-                )
-
-            token_pointer += 1
-
-
-    def split_token(self, token, partial_text):
-
-        sentence_id = token['sentence_id']
-        abs_index = token['abs_id'] + 1
-        rel_index = token['id'] + 1
-
-        remainder = token['text'].split(partial_text, 1)[1]
-        token['text'] = partial_text
-        remainder_token = dict(token, text=remainder)
-
-        self.insert_token(abs_index, sentence_id, rel_index, remainder_token)
-
-        return token, remainder_token
-
-
-    def insert_token(self, abs_index, sentence_id, rel_index, token):
-        self.tokens.insert(abs_index, token)
-        self.sentences[sentence_id]['tokens'].insert(rel_index, token)
-
-        # Do a bunch of index fixing to account for the newly inserted token
-        self.write_token_ids()
-        self.fix_sentence_indices(abs_index)
-        self.fix_mentions_tokens(abs_index, sentence_id)
-
-
-    def validate_mention_tokens(self):
-
-        for reference_id, reference in self.coreferences.items():
-            if 'representative' in reference:
-                rep = reference['representative']
-                expected_text = rep['text']
-                found_text = self.get_mention_tokens(rep).text()
-
-                if not text_match_nowhite(expected_text, found_text):
-                    raise ValueError(
-                        'Non-matching text in doc# %d, reference# %d, '
-                        'mention# [rep]. Expected "%s", found "%s".'
-                        % (self.doc_num,reference_id,expected_text,found_text)
-                    )
-
-            for mention_id, mention in enumerate(reference['mentions']):
-                expected_text = mention['text']
-                found_text = self.get_mention_tokens(mention).text()
-
-                if not text_match_nowhite(expected_text, found_text):
-                    raise ValueError(
-                        'Non-matching text in doc# %d, reference# %d, '
-                        'mention# %d. Expected "%s", found "%s".'
-                        % (
-                            self.doc_num,reference_id,mention_id,
-                            expected_text,found_text
-                        )
-                    )
-
-
-    def fix_sentence_indices(self, abs_index):
-        for sentence in self.sentences:
-            sentence['token_span'] = self.fix_token_span(
-                abs_index, sentence['token_span'])
-
-
-    def fix_mentions_tokens(self, abs_index, sentence_id):
-        for reference in self.coreferences.values():
-            if 'representative' in reference:
-                self.fix_mention_tokens(
-                    abs_index, sentence_id, reference['representative'])
-            for mention in reference['mentions']:
-                self.fix_mention_tokens(abs_index, sentence_id, mention)
-
-
-    def fix_token_span(self, abs_index, token_span):
-        return parc_reader.token_span.TokenSpan([
-            (maybe_increment(start,abs_index), maybe_increment(stop,abs_index))
-            for start, stop in token_span
-        ])
-
-
-    def fix_mention_tokens(self, abs_index, sentence_id, mention):
-        mention['token_span'] = self.fix_token_span(
-            abs_index, mention['token_span'])
-        if mention['sentence_id'] == sentence_id:
-            mention['tokens'] = self.get_mention_tokens(mention)
-
-
-    def write_token_ids(self):
-        last_sentence_id = None
-        within_sentnece_token_id = 0
-        for abs_id, token in enumerate(self.tokens):
-
-            sentence_id = token['sentence_id']
-            if sentence_id != last_sentence_id:
-                within_sentence_token_id = 0
-            else:
-                within_sentence_token_id += 1
-            last_sentence_id = sentence_id
-
-            token['abs_id'] = abs_id
-            token['id'] = within_sentence_token_id
-
-
-    def initialize_document(self, doc):
-        self.tokens = doc['tokens']
-        self.sentences = doc['sentences']
-
-
-    def initialize_coreferences(self, coreferences=None):
-        self.next_coreferences_id = 0
-        self.coreferences = {}
-        self.add_coreferences(coreferences)
-
-
-    def get_reference_id(self):
-        self.next_coreferences_id += 1
-        return self.next_coreferences_id - 1
-
-
-    def validate_text_match(self, mention, mention_tokens):
-        # Check that tokens we found contain the text we expected
-        # (ignoring differences in whitespace).
-        found_mention_text = ''.join(t['text'] for t in mention_tokens)
-        found_text_no_white = WHITESPACE.sub('', found_mention_text)
-        expected_text_no_white = WHITESPACE.sub('', mention['text'])
-        if found_text_no_white != expected_text_no_white:
-            raise ValueError(
-                'While adding a mention within a coreference chains, '
-                'the tokens found for the mention did not match the '
-                'Expected text.  '
-                'expected "%s", but found "%s"'
-                % (expected_text_no_white, found_text_no_white)
-            )
-
-
-    def raise_non_matching(self, expected_text, found_text):
-
-        raise ValueError(
-            'While adding a mention within a coreference chains for file %d, '
-            'the tokens found for the mention did not match the '
-            'Expected text.  '
-            'expected "%s", but found "%s"'
-            % (self.doc_num, expected_text, found_text)
-        )
-
-
-    def check_tokens_match(self, mention, mention_tokens):
-        found_token_text = ''.join(t['text'] for t in mention_tokens)
-        if not text_match_nowhite(found_token_text, mention['text']):
-            self.raise_non_matching(found_token_text, mention['text'])
-
-
-    def get_mention_tokens(self, mention, absolute=True):
-        if absolute:
-            return mention['token_span'].select_tokens(self.tokens)
-        sentence = self.sentences[mention['sentence_id']]
-        return mention['token_span'].select_tokens(sentence['tokens'])
-
-
-    def accumulate_representative(self, representative, mention):
-        """
-        merges together multiple mentions
-        """
-
-        # Accumulate antecedents (not pronouns) to make the representative
-        if mention['mention_type'] == 'pronoun':
-            return representative
-
-        # Begin accumulating the representative
-        if representative is None:
-            return self.copy_mention(mention)
-
-        # Continue accumulating the representative
-        representative['tokens'].extend(mention['tokens'])
-        representative['token_span'].extend(mention['token_span'])
-        representative['text'] = representative['tokens'].text()
-        return representative
-
-
-    def copy_mention(self, mention):
-
-        # Most members get copied by value here.
-        new_mention = parc_reader.mention.Mention(**mention)
-
-        # But we need to ensure that the token list is copied by *value*
-        # (although the underlying tokens are still copied by reference).
-        new_mention['tokens'] = parc_reader.token_list.TokenList(
-            mention['tokens'])
-
-        return new_mention
-
-
-    def add_coreferences(self, coreferences=None):
-
-        if coreferences is None:
-            return
-
-        for reference in coreferences:
-
-            # Make an internal copy and keep the passed-in object untouched.
-            reference_id = self.get_reference_id()
-            new_reference = {
-                'id': reference_id,
-                'mentions': [],
-            }
-            self.coreferences[reference_id] = new_reference
-
-            representative = None
-            for mention in reference:
-
-                # Get mention tokens (they are indexed from start of sentence).
-                mention_tokens = self.get_mention_tokens(
-                    mention, absolute=False)
-
-                # Ensure that we got the right tokens by checking the text.
-                self.check_tokens_match(mention, mention_tokens)
-
-                token_span = parc_reader.token_span.TokenSpan(
-                    mention['token_span'])
-
-                # Store token indices relative to the start of the document.
-                token_span = tokens_2_token_span(mention_tokens, absolute=True)
-
-                new_mention = parc_reader.mention.Mention(
-                    token_span=token_span,
-                    sentence_id=mention['sentence_id'],
-                    tokens=mention_tokens,
-                    text=mention_tokens.text(),
-                    mention_type=mention['mention_type'],
-                    reference=new_reference
-                )
-
-                new_reference['mentions'].append(new_mention)
-
-                representative = self.accumulate_representative(
-                    representative, new_mention)
-
-            if representative is not None:
-                new_reference['representative'] = representative
 
 
 def tokens_2_token_span(tokens, absolute=True):
-    token_span = parc_reader.token_span.TokenSpan()
+    token_span = parc_reader.spans.TokenSpan()
     curr_start = None
     last_id = None
     id_field = 'abs_id' if absolute else 'id'
@@ -445,7 +235,7 @@ class AutoIncrementer(object):
         return self.pointer - 1
 
 
-def read_sentences(path=BNP_SENTENCES_PATH):
+def read_coreference_sentences(path=BNP_SENTENCES_PATH, limit=None):
     print "Reading BBN sentences.  This will take a minute..."
     documents = {}
     state = 'root'
@@ -459,12 +249,17 @@ def read_sentences(path=BNP_SENTENCES_PATH):
 
             if line[0] == '(':
                 # We are starting a new document
-                doc_num = parse_doc_num(line)
+                doc_id = parse_doc_id(line)
+
+                # Can stop early for debugging purposes
+                if limit is not None and doc_id > limit:
+                    return documents
+
                 state = 'in_doc'
                 abs_token_id.reset()
                 new_token_list = parc_reader.token_list.TokenList()
                 document = {'sentences':[], 'tokens':new_token_list}
-                documents[doc_num] = document
+                documents[doc_id] = document
 
             else:
                 raise ValueError(
@@ -496,17 +291,14 @@ def read_sentences(path=BNP_SENTENCES_PATH):
                     for i, t in enumerate(content.lstrip().split())
                 ])
 
-                start_index = len(document['tokens'])
+                start = len(document['tokens'])
                 document['tokens'].extend(tokens)
-                end_index = len(document['tokens'])
-                token_span = parc_reader.token_span.TokenSpan(
-                    single_range=(start_index, end_index))
+                end = len(document['tokens'])
 
-                document['sentences'].append({
+                document['sentences'].append(parc_reader.spans.Span({
                     'id': sentence_id,
-                    'token_span': token_span,
-                    'tokens': tokens
-                })
+                    'token_span': [(None, start, end)]
+                }, absolute=True))
 
             elif line == ')':
                 state = 'root'
@@ -521,10 +313,8 @@ def read_sentences(path=BNP_SENTENCES_PATH):
     return documents
 
 
-
 def remove_whitespace(string):
     return WHITESPACE.sub('', string)
-
 
 
 def text_match_nowhite(text1, text2):
@@ -534,25 +324,123 @@ def text_match_nowhite(text1, text2):
 
 
 
-def read_pronouns(path=BNP_PRONOUNS_PATH):
+def read_coreference_annotations(path=BNP_PRONOUNS_PATH, limit=None):
+    parsed_docs = parse_coreference_annotations(open(path).read(), limit)
+    annotations_by_doc = assemble_all_coreference_annotations(parsed_docs)
+    return annotations_by_doc
+
+
+
+def assemble_all_coreference_annotations(parsed_docs):
+    return {
+        doc_id : assemble_doc_coreference_annotations(coreference_specs)
+        for doc_id, coreference_specs in parsed_docs.items()
+    }
+
+
+
+def assemble_doc_coreference_annotations(coreference_specs):
+
+    coreferences = {}
+    mentions = {}
+
+    # We'll need a sorting function for later...
+    def get_mention_sort_key(mention_id):
+        return mentions[mention_id]['token_span'][0]
+
+    for coreference_spec in coreference_specs:
+
+        coreference_id = len(coreferences)
+        coreference = Coreference({
+            'id': coreference_id,
+            'pronouns': [],
+            'antecedents': [],
+        })
+        coreferences[coreference_id] = coreference
+
+        for mention in coreference_spec:
+            mention_id = len(mentions)
+            mention['id'] = mention_id
+            mention['coreference_id'] = coreference_id
+            mentions[mention_id] = mention
+            coreference[mention['mention_type']+'s'].append(mention_id)
+
+        coreference['pronouns'].sort(key=get_mention_sort_key)
+        coreference['antecedents'].sort(key=get_mention_sort_key)
+
+        representative = accumulate_representative(
+            mentions, coreference['antecedents']
+        )
+        if representative is not None:
+            representative_id = len(mentions)
+            representative['id'] = representative_id
+            mentions[representative_id] = representative
+            coreference['representative'] = representative_id
+        else:
+            coreference['representative'] = None
+
+
+    return coreferences, mentions
+
+
+class Coreference(dict):
+    def accomodate_inserted_token(self, *insertion_point):
+        pass
+
+
+def accumulate_representative(mentions, antecedent_ids):
+    """
+    merges together multiple antecedents into one representative mention.
+    """
+
+    representative = None
+    for antecedent_id in antecedent_ids:
+        antecedent = mentions[antecedent_id]
+
+        if representative is None:
+            representative = parc_reader.spans.Span(
+                antecedent, mention_type='representative')
+
+        else:
+            representative.add_token_ranges(antecedent['token_span'])
+            representative['text'] += ' ' + antecedent['text']
+
+    return representative
+
+
+
+def assert_text_match(expected_text, found_text):
+    if not text_match_nowhite(expected_text, found_text):
+        raise ValueError(
+            'While adding a mention within a coreference chains for file %d, '
+            'the tokens found for the mention did not match the '
+            'Expected text.  '
+            'expected "%s", but found "%s"'
+            % (expected_text, found_text)
+        )
+
+
+
+def parse_coreference_annotations(text_to_parse, limit=None):
     print "Reading BBN pronouns.  This will take a minute..."
     state = 'root'
     documents = {}
 
-    #print path
-
-    for i, line in enumerate(open(path)):
+    for i, line in enumerate(text_to_parse.split('\n')):
 
         line = line.rstrip()
 
-        #print '%d\t%s' % (i,line)
-
         if state == 'root':
             if line[0] == '(':
-                doc_num = parse_doc_num(line)
+                doc_id = parse_doc_id(line)
+
+                # Can stop early for debugging purposes
+                if limit is not None and doc_id > limit:
+                    return documents
+
                 state = 'in_doc'
                 coreferences = []
-                documents[doc_num] = coreferences
+                documents[doc_id] = coreferences
 
             else:
                 raise ValueError(
@@ -568,8 +456,8 @@ def read_pronouns(path=BNP_PRONOUNS_PATH):
 
             elif line == '    (':
                 state = 'in_reference'
-                reference = []
-                coreferences.append(reference)
+                coreference = []
+                coreferences.append(coreference)
 
             else:
                 raise ValueError(
@@ -577,17 +465,17 @@ def read_pronouns(path=BNP_PRONOUNS_PATH):
                     'Got "%s" on line %d.' % (line, i)
                 )
 
-        elif state == 'in_reference':
+        elif state == 'in_coreference':
 
             if line.startswith('\tAntecedent') or line.startswith('\tPronoun'):
                 mention = parse_mention(line)
-                if doc_num == 1591 and mention['sentence_id'] == 0:
+                if doc_id == 1591 and mention['sentence_id'] == 0:
                     correct_token_offset_error(mention)
-                reference.append(mention)
+                coreference.append(mention)
 
             elif line == '    )':
                 state = 'in_doc'
-                reference = None
+                coreference = None
 
             else:
                 raise ValueError(
@@ -606,14 +494,14 @@ def read_pronouns(path=BNP_PRONOUNS_PATH):
 
 
 def correct_token_offset_error(mention):
-    mention['token_span'] = parc_reader.token_span.TokenSpan([
+    mention['token_span'] = parc_reader.spans.TokenSpan([
         (start - 1, end - 1) for start, end in mention['token_span']
     ])
 
 
 
 ARTICLE_NUM_MATCHER = re.compile('\(?WSJ(\d\d\d\d)')
-def parse_doc_num(line):
+def parse_doc_id(line):
     try:
         return int(ARTICLE_NUM_MATCHER.match(line).groups()[0])
     except: 
@@ -621,33 +509,31 @@ def parse_doc_num(line):
 
 
 
-def parse_mention(line, expected_mention_type=None):
+def parse_mention(line):
 
     mention_type, location_spec, text = t4k.stripped(line.split('->'))
-    sentence_spec, token_range_spec = location_spec.split(':')
-    sentence_id = parse_sentence_id(sentence_spec)
-    token_span = parc_reader.token_span.TokenSpan(
-        single_range=parse_token_range(token_range_spec))
+    sentence_id, start, stop = parse_location_spec(location_spec)
 
-    if expected_mention_type is not None:
-        if mention_type != expected_mention_type:
-            raise ValueError(
-                ('Expected definition for mention type "%s".  '
-                'Got "%s" instead.') % (expected_mention_type, line)
-            )
-
-    return parc_reader.mention.Mention(**{
-        'mention_type': mention_type.lower(),
-        'sentence_id': sentence_id,
-        'token_span': token_span,
-        'text': text
-    })
+    return parc_reader.spans.Span(
+        mention_type=mention_type.lower(),
+        sentence_id=sentence_id,
+        token_span=[(sentence_id, start, stop)],
+        text=text
+    )
 
 
 def maybe_increment(val, insertion_point):
     if val >= insertion_point:
         return val + 1
     return val
+
+
+
+def parse_location_spec(location_spec):
+    sentence_spec, token_range_spec = location_spec.split(':')
+    sentence_id = parse_sentence_id(sentence_spec)
+    start, stop = parse_token_range(token_range_spec)
+    return sentence_id, start, stop
 
 
 SENTENCE_ID_MATCHER = re.compile('S(\d+)')

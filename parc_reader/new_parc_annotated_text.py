@@ -26,19 +26,56 @@ def read_parc_file(parc_xml, include_nested=False):
     slightly, as long as some effort to reconcile tokens is made. 
     """
     soup = Soup(parc_xml)
-    sentence_tags = soup.find_all('sentence')
-    new_doc = {'sentences':[], 'tokens':[], 'attributions':[]}
-    for sentence_wrapper_tag in sentence_tags:
+    sentence_wrapper_tags = soup.find_all('sentence')
+    annotated_doc = parc_reader.annotated_document.AnnotatedDocument()
+    all_attributions = []
+    for sentence_wrapper_tag in sentence_wrapper_tags:
         real_sentence_tag = sentence_wrapper_tag.contents[0]
-        sentence_node, attributions = recursively_parse(real_sentence_tag)
-        new_doc['sentences'].append(sentence_node)
-        new_doc['tokens'].extend(sentence_node['tokens'])
-        new_doc['attributions'].extend(attributions)
+        sentence, attributions = recursively_parse(
+            real_sentence_tag, annotated_doc)
+        all_attributions.extend(attributions)
 
-    return new_doc
+        #new_doc['sentences'].append(sentence_node)
+        #new_doc['tokens'].extend(sentence_node['tokens'])
+        #new_doc['attributions'].extend(attributions)
+
+    # Assemble attribution fragments and use sentence-relative addressing
+    attributions = stitch_attributions(all_attributions, annotated_doc)
+    annotated_doc.annotations['attributions'] = attributions
+
+    # Make non-sentence constituents use sentence-relative addressing
+    for sentence in annotated_doc.sentences:
+        for child in sentence['constituency_children']:
+            child.relativize(annotated_doc)
+
+    return annotated_doc, attributions
 
 
-def recursively_parse(tag):
+
+def stitch_attributions(attribution_specs, annotated_doc):
+    attributions = {}
+    for attribution_spec in attribution_specs:
+        attr_id = attribution_spec['id']
+        if attr_id not in attributions:
+            attribution = parc_reader.spans.Attribution(absolute=True)
+            attributions[attr_id] = attribution
+        else:
+            attribution = attributions[attr_id]
+
+        roles = attribution_spec['roles']
+        for role in roles:
+            attribution[role].add_token_ranges(attribution_spec['token_span'])
+
+    for attribution in attributions.values():
+        for role in attribution.ROLES:
+            attribution[role].consolidate()
+        attribution.relativize(annotated_doc)
+
+    return attributions
+
+
+
+def recursively_parse(tag, annotated_doc, depth=0):
 
     # Make sure we're doing the right thing
     node_type = tag.name.lower()
@@ -48,39 +85,71 @@ def recursively_parse(tag):
             % tag.name.lower())
 
     # We're building a constituency parse node from an xml tag.
-    node = {
+    # Each constituent is modelled as a span that has direct references to its
+    # children.  Then need to be modelled as absolute spans at first.
+    node = parc_reader.spans.Constituency({
         'is_token': False,
         'constituency_node_type': node_type
-    }
-    node.update(tag.attrs)
+    }, absolute=True, **tag.attrs)
 
-    # When we parse the children, they will yield new tokens and attributions
-    # which we also need to capture.
-    node['const_children'] = []
-    node['tokens'] = []
+    # We'll capture attributions from children
     attributions = []
 
     # Parse the children
     for child_tag in tag.contents:
 
-        # Parse attributions.  Bind them directly to the node and keep as list.
+        # We shouldn't encounter attributions as direct children of internal
+        # constituency nodes.
         if child_tag.name.lower() == 'attribution':
             print 'this node:', node
             print 'this tag:', tag
             raise ValueError(
                 'Got <attribution> tag.  Expecting a constituency tag.')
 
+        # Handle parsing child tokens
         elif child_tag.name.lower() == 'word':
             child_node = parse_token(child_tag)
             child_attributions = child_node['attributions']
-            node['tokens'].append(child_node)
 
+            abs_id = annotated_doc.add_token(child_node)
+            token_pointer = (None, abs_id, abs_id+1)
+            for attribution in child_attributions:
+                attribution['token_span'].add_token_range(token_pointer)
+            node['token_span'].add_token_range(token_pointer)
+
+            # As usual, we only want to provide a pointer to tokens, but for
+            # consistency in traversing the constituency tree, the token should
+            # appear in the node's constituency_children list.  We provide only
+            # a stub to create the link
+            node['constituency_children'].append(
+                parc_reader.spans.Constituency({
+                    'constituency_node_type': 'token',
+                    'token_span': [(None, abs_id, abs_id+1)]
+                }, absolute=True)
+            )
+
+        # Handle parsing child internal constituency nodes
         else:
-            child_node, child_attributions = recursively_parse(child_tag)
-            node['tokens'].extend(child_node['tokens'])
+            child_node, child_attributions = recursively_parse(
+                child_tag, annotated_doc, depth+1)
 
-        node['const_children'].append(child_node)
+            # Refuse children that are <none> tags
+            if child_node['constituency_node_type'] == 'none':
+                continue
+
+            # Refuse children that themselves have no children, depste not
+            # being tokens.
+            if len(child_node['constituency_children']) == 0:
+                continue
+
+            node['token_span'].add_token_ranges(child_node['token_span'])
+            node['constituency_children'].append(child_node)
+
         attributions.extend(child_attributions)
+
+    node['token_span'].consolidate()
+    if depth == 0:
+        annotated_doc.add_sentence(node)
 
     return node, attributions
 
@@ -101,6 +170,11 @@ def parse_token(tag):
     node.update(tag.attrs)
     node['is_token'] = True
 
+    # Correct an inconsistency in WSJ document 4 of PTB2
+    if tag['gorn'].split(',')[0] == '1':
+        if node['text'] == 'IBC/Donoghue':
+            node['text'] = 'IBC'
+
     # Tokens don't have children in the constituency parse, but the attribution
     # annotations appear as children in the xml.
     node['attributions'] = []
@@ -115,10 +189,10 @@ def parse_token(tag):
 
 
 def parse_attribution(tag):
-    return {
+    return parc_reader.spans.Span({
         'id': tag['id'],
         'roles': [role_tag['rolevalue'] for role_tag in tag('attributionrole')]
-    }
+    }, absolute=True)
 
 
 

@@ -9,6 +9,7 @@ import parc_dataset
 import new_reader
 import align_attributions
 import token_list
-import token_span
-import mention
+import spans
 import bnp_pronouns_reader
+import annotated_document
+import SETTINGS
