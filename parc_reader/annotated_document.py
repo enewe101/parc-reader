@@ -80,7 +80,6 @@ class AnnotatedDocument(object):
 
 
     def relativize(self, token_ranges):
-        print 'trying to process:', token_ranges
         new_token_ranges = []
 
         for token_range in token_ranges:
@@ -94,7 +93,6 @@ class AnnotatedDocument(object):
             for sentence_id, sentence in enumerate(self.sentences):
 
                 _, sent_start, sent_end = sentence['token_span'][0]
-                print 'comparing to:', sentence['token_span'][0]
 
                 if start >= sent_start and start < sent_end:
                     if end <= sent_end:

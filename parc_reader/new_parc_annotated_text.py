@@ -10,6 +10,39 @@ def new_annotation():
     return {'sentences':set(), 'source':[],'cue':[],'content':[]}
 
 
+def test_read_parc_file():
+    first_interesting_article = 3
+    path = parc_reader.parc_dataset.get_parc_path(first_interesting_article)
+    doc = read_parc_file(open(path).read())
+
+    annotation_id = 'wsj_0003_Attribution_relation_level.xml_set_1'
+    annotation = doc.annotations['attributions'][annotation_id]
+
+    condition = annotation['content'] == [(0,0,32)]
+    assert condition, 'incorrect attribution content'
+    print 'attribution content span ok'
+
+    found_content_text = doc.get_tokens(annotation['content']).text()
+    expected_content_text = (
+        "A form of asbestos once used to make Kent cigarette filters has "
+        "caused a high percentage of cancer deaths among a group of workers "
+        "exposed to it more than 30 years ago"
+    )
+
+    condition = found_content_text == expected_content_text
+    assert condition, 'incorrect attribution content text'
+    print 'attribution content text ok'
+
+    num_attributions = len(doc.annotations['attributions'])
+    expected_num_attributions = 13
+    condition = num_attributions == expected_num_attributions,
+    assert condition, 'incorrect number of attributions found'
+
+    print 'num_attributions ok'
+
+    return doc
+
+
 def read_parc_file(parc_xml, include_nested=False):
     """
     This reads in annotation information from parc xml files.  
@@ -35,10 +68,6 @@ def read_parc_file(parc_xml, include_nested=False):
             real_sentence_tag, annotated_doc)
         all_attributions.extend(attributions)
 
-        #new_doc['sentences'].append(sentence_node)
-        #new_doc['tokens'].extend(sentence_node['tokens'])
-        #new_doc['attributions'].extend(attributions)
-
     # Assemble attribution fragments and use sentence-relative addressing
     attributions = stitch_attributions(all_attributions, annotated_doc)
     annotated_doc.annotations['attributions'] = attributions
@@ -48,7 +77,7 @@ def read_parc_file(parc_xml, include_nested=False):
         for child in sentence['constituency_children']:
             child.relativize(annotated_doc)
 
-    return annotated_doc, attributions
+    return annotated_doc
 
 
 
