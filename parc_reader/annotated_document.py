@@ -1,7 +1,7 @@
 import re
 import parc_reader
+import t4k
 
-WHITESPACE = re.compile('\s+')
 class AnnotatedDocument(object):
 
     def __init__(self,
@@ -150,41 +150,62 @@ class AnnotatedDocument(object):
                 print '\n\t' + '-'*30 + '\n'
 
 
-    def merge_tokens(self, other, copy_token_fields, copy_annotations):
+    def merge_tokens(
+        self,
+        other,
+        copy_token_fields,
+        copy_annotations,
+        verbose=False
+    ):
 
         # Copy over annotations
         for annotation in copy_annotations:
             self.annotations[annotation] = other.annotations[annotation]
 
-        token_pointer = 0
-        for other_token in other.tokens:
+        self_token_pointer = 0
+        for other_token_pointer, other_token in enumerate(other.tokens):
 
-            self_token = self.tokens[token_pointer]
+            try:
+                self_token = self.tokens[self_token_pointer]
+            except IndexError:
+                if other_token['text'] == '.':
+                    continue
+                raise
+
             self_text, other_text = self_token['text'], other_token['text']
-
             print self_text, other_text
 
             # Skip the stray apostraphe in doc 63.
             if self.doc_id == 63:
                 if self_token['abs_id'] == 291:
                     continue
+            
+            force_same_token = False
+            if self.doc_id == 2201:
+                if self_token['abs_id'] == 890:
+                    other_text = self_text
+                    force_same_token = True
 
             # If they are the same token, merge the annotations
-            if self_text == other_text:
+            if is_same_token(self_text, other_text) or force_same_token:
                 self_token.update(t4k.select(other_token, copy_token_fields))
 
             # If the new token is a subset of the existing token, split
             # the existing token
-            elif self_text.startswith(other_text):
+            elif startswith(self_text, other_text):
+                prefix, postfix = match_split(self_text, other_text)
                 print (
                     '\t\tdoc #%d, token %d, splitting "%s" into "%s" and "%s"'
                     % (
                         self.doc_id, self_token['abs_id'], self_text,
-                        other_text, self_text.split(other_text, 1)[1]
+                        prefix, postfix
                     )
                 )
                 self_token, remainder = self.split_token(self_token, other_text)
                 self_token.update(t4k.select(other_token, copy_token_fields))
+
+            elif self_text == other.tokens[other_token_pointer+1]['text']:
+                continue
 
             else:
                 raise ValueError(
@@ -192,15 +213,17 @@ class AnnotatedDocument(object):
                     % (self.doc_id,self_token['abs_id'],self_text,other_text)
                 )
 
-            token_pointer += 1
+            self_token_pointer += 1
 
 
     def split_token(self, token, partial_text):
 
         abs_index = token['abs_id'] + 1
-        remainder = token['text'].split(partial_text, 1)[1]
+
+        prefix, postfix = match_split(token['text'], partial_text)
+
         token['text'] = partial_text
-        remainder_token = dict(token, text=remainder)
+        remainder_token = dict(token, text=postfix)
         self.insert_token(abs_index, remainder_token)
 
         return token, remainder_token
@@ -306,32 +329,86 @@ class AnnotatedDocument(object):
             token['id'] = within_sentence_token_id
 
 
-    #def initialize_coreferences(self, coreferences=None):
-    #    self.next_coreferences_id = 0
-    #    self.coreferences = {}
-    #    self.add_coreferences(coreferences)
+
+def match_split(text1, text2):
+    text1_ = text1.replace("`", "'")
+    text2_ = text2.replace("`", "'")
+
+    ptr1, ptr2 = 0, 0
+    while ptr1 < len(text1_) and ptr2 < len(text2_):
+        if text1_[ptr1].lower() == text2_[ptr2].lower():
+            ptr1 += 1
+            ptr2 += 1
+        elif text1_[ptr1] in "`'" and text2[ptr2] in "`'":
+            ptr1 += 1
+            ptr2 += 1
+        elif text1_[ptr1] == 'E':
+            ptr1 += 1
+        else:
+            raise ValueError(
+                'could not match-split tokens "%s" and %s'
+                % (text1, text2)
+            )
+
+    prefix, postfix = text1[:ptr1], text1[ptr1:]
+    return prefix, postfix
 
 
-    #def validate_text_match(self, mention, mention_tokens):
-    #    # Check that tokens we found contain the text we expected
-    #    # (ignoring differences in whitespace).
-    #    found_mention_text = ''.join(t['text'] for t in mention_tokens)
-    #    found_text_no_white = WHITESPACE.sub('', found_mention_text)
-    #    expected_text_no_white = WHITESPACE.sub('', mention['text'])
-    #    if found_text_no_white != expected_text_no_white:
-    #        raise ValueError(
-    #            'While adding a mention within a coreference chains, '
-    #            'the tokens found for the mention did not match the '
-    #            'Expected text.  '
-    #            'expected "%s", but found "%s"'
-    #            % (expected_text_no_white, found_text_no_white)
-    #        )
+def startswith(text1, text2):
+
+    text1 = text1.replace("`", "'")
+    text2 = text2.replace("`", "'")
+
+    if text1.lower().startswith(text2.lower()):
+        return True
+
+    ptr1, ptr2 = 0, 0
+    match = True
+    while ptr1 < len(text1) and ptr2 < len(text2):
+        if text1[ptr1].lower() == text2[ptr2].lower():
+            ptr1 += 1
+            ptr2 += 1
+        elif text1[ptr1] in "`'" and text2[ptr2] in "`'":
+            ptr1 += 1
+            ptr2 += 1
+        elif text1[ptr1] == 'E':
+            ptr1 += 1
+        else:
+            match = False
+            break
+
+    return match
 
 
+def is_same_token(text1, text2):
+    text1 = text1.replace("`", "'")
+    text2 = text2.replace("`", "'")
+    if translation(text1).lower() == text2.lower():
+        return True
+    if (set(text1.lower()) - set(text2.lower())) == set('e'):
+        return True
+    return False
 
-    #def get_mention_tokens(self, mention, absolute=True):
-    #    if absolute:
-    #        return mention['token_span'].select_tokens(self.tokens)
-    #    sentence = self.sentences[mention['sentence_id']]
-    #    return mention['token_span'].select_tokens(sentence['tokens'])
+
+TRANSLATOR = {
+    'S.p.EA.': 'S.p.A.',
+    '7\/E16': '7\/16',
+    u'\xd5TPA\xe5': 'TPA',
+    '<Tourism': 'Tourism',
+    'Bard\/EEMS': 'Bard\/EMS',
+    '`S': "'S",
+    "'T": "'T-",
+    "H.\EF.": "H.F.",
+    u"\xd5and\xe5": "and",
+    u"\xd5illegal": "illegal",
+    u'exports\xe5': 'exports',
+    "16/": "16",
+    u'\xd5Fifth\xe5': 'Fifth',
+    "`n'": "'n'"
+}
+
+def translation(string):
+    if string in TRANSLATOR:
+        return TRANSLATOR[string]
+    return string
 

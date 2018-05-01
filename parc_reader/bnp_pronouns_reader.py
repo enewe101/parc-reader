@@ -4,6 +4,7 @@ import re
 import t4k
 import copy
 import bs4
+from collections import defaultdict
 
 
 BNP_PRONOUNS_PATH = os.path.join(
@@ -12,60 +13,145 @@ BNP_SENTENCES_PATH = os.path.join(
     parc_reader.SETTINGS.BNP_DIR, 'data', 'BBN-wsj-pronouns', 'WSJ.sent')
 BBN_ENTITY_TYPES_DIR = os.path.join(
     parc_reader.SETTINGS.BNP_DIR, 'data', 'WSJtypes-subtypes')
-
+PROPBANK_PATH = os.path.join(
+    parc_reader.SETTINGS.PROPBANK_DIR, 'data', 'vloc.txt')
 
 def read_bnp_pronoun_dataset(
-    pronouns_path=BNP_PRONOUNS_PATH,
-    sentences_path=BNP_SENTENCES_PATH,
+    subset='all',
+    skip=None,
     limit=None
 ):
 
-    annotated_docs = {}
-
-    coref_sentences_by_doc = read_coreference_sentences(limit=limit)
-    coreferences_by_doc = read_coreference_annotations(limit=limit)
+    # Read in coreference, entity, and attribution annotations from disk
+    coreference_annotated_docs = read_coreference_annotations(
+        subset=subset, skip=skip, limit=limit)
     entity_annotated_docs = read_bbn_entity_types(limit=limit)
     attributions_by_doc = parc_reader.parc_dataset.read_all_parc_files(
-        limit=limit)
-    #print 'Combining annotations from multiple sources...'
+        subset=subset, skip=skip, limit=limit)
+    propbank_verbs_by_doc = read_propbank_verbs()
 
-    # Choose one of the annotations sources as a list of documents
-    doc_ids = coreferences_by_doc.keys()
-
+    # Prepare to iterate over all docs, combine the three anotation sources for
+    # each, and save them in a dictionary.
+    merged_annotated_docs = {}
     seen_docs = set()
-    for doc_id in doc_ids:
+    expected_docs = list(
+        parc_reader.parc_dataset.iter_doc_num(subset, skip, limit))
+    for doc_id in expected_docs:
 
-        coref_sentences = coref_sentences_by_doc[doc_id]
-        coreferences, mentions = coreferences_by_doc[doc_id]
-        coref_annotated_doc = make_coreference_annotated_text(
-            coref_sentences['tokens'],
-            coref_sentences['sentences'],
-            coreferences,
-            mentions,
-            doc_id
-        )
+        # Annotations could be missing for any given doc.  Just step over it.
+        try:
+            coreference_annotated_doc = coreference_annotated_docs[doc_id]
+            attribution_annotated_doc = attributions_by_doc[doc_id]
+            entity_annotated_doc = entity_annotated_docs[doc_id]
+            propbank_verbs = propbank_verbs_by_doc[doc_id]
+        except KeyError:
+            print 'Could not create doc_id %d' % doc_id
+            continue
 
-        entity_annotated_doc = entity_annotated_docs[doc_id]
-
-        coref_annotated_doc.merge_tokens(
+        # Merge entity-type annotations with coreference annotations.
+        coreference_annotated_doc.merge_tokens(
             entity_annotated_doc,
             copy_token_fields=['entity'],
-            copy_annotations=['entities']
+            copy_annotations=['entities'],
+            verbose=True
         )
 
-        annotated_docs[doc_id] = coref_annotated_doc
+        # Merge the parc-derived annotations (attribution, constituency parse,
+        # and part-of-speech (POS)) with the other annotations.
+        attribution_annotated_doc.merge_tokens(
+            coreference_annotated_doc,
+            copy_token_fields=['entity'],
+            copy_annotations=['entities', 'coreferences']
+        )
 
+        merge_propbank_verbs(attribution_annotated_doc, propbank_verbs)
+
+        merged_annotated_docs[doc_id] = attribution_annotated_doc
         seen_docs.add(doc_id)
 
-    unseen_articles = set(doc_ids) - seen_docs
-    if len(unseen_articles) > 0:
-        print (
-            "Warning: some articles were not included: %s." 
-            % ', '.join(sorted(t4k.strings(unseen_articles)))
-        )
+    return merged_annotated_docs
 
-    return annotated_docs
 
+
+def merge_propbank_verbs(annotated_doc, propbank_verbs):
+    """
+    Incoroporate propbank_verb annotations into annotated_doc.
+
+    Find tokens in annotated_doc that correspond to propbank verbs; add an
+    attribute to those tokens, and place a list of all propbank verbs in the
+    documents annotations dictionary.
+
+    This works by mutating annotated_doc.
+    """
+    propbank_verb_tokens = []
+    for sentence_id, token_id, lemma in propbank_verbs:
+        token = find_nearest_matching_token(
+            annotated_doc, sentence_id, token_id, lemma)
+        token['is_propbank_verb'] = True
+        token_range = (token['sentence_id'], token['id'], token['id'] + 1)
+        propbank_verb_tokens.append(parc_reader.spans.Span({
+            'lemma': lemma,
+            'token_span': [token_range]
+        }))
+
+    annotated_doc.annotations['propbank_verbs'] = propbank_verb_tokens
+
+
+
+MAX_TOKEN_MATCH_DISTANCE = 5
+def find_nearest_matching_token(annotated_doc, sentence_id, token_id, lemma):
+
+    # Absolutize the location that we're expecting the token
+    absolute_token_id = annotated_doc.absolutize(
+        [(sentence_id, token_id, token_id+1)]
+    )[0][1]
+
+    token_found = False
+    distance = 0
+    while not token_found and distance <= MAX_TOKEN_MATCH_DISTANCE:
+
+        print 'looking at distance %d' % distance
+
+        check_token_id = absolute_token_id + distance
+        found_lemma = annotated_doc.tokens[check_token_id]['lemma']
+        if parc_reader.annotated_document.is_same_token(lemma, found_lemma):
+            return annotated_doc.tokens[check_token_id]
+
+        check_token_id = absolute_token_id - distance
+        found_lemma = annotated_doc.tokens[check_token_id]['lemma']
+        if parc_reader.annotated_document.is_same_token(lemma, found_lemma):
+            return annotated_doc.tokens[check_token_id]
+
+        distance += 1
+
+    raise ValueError(
+        'Could not find a token with lemma %s near token %d in sentence %d.'
+        % (lemma, token_id, sentence_id)
+    )
+
+
+
+
+
+
+def read_propbank_verbs(path=PROPBANK_PATH):
+
+    propbank_verbs_by_doc = defaultdict(list)
+    for line in t4k.trimmed_nonblank(open(path)):
+        doc_id, sentence_id, token_id, lemma = parse_propbank_line(line)
+        propbank_verbs_by_doc[doc_id].append((sentence_id, token_id, lemma))
+
+    return propbank_verbs_by_doc
+
+
+
+PROPBANK_LINE_PARSER = re.compile(
+    'wsj/\d\d/wsj_(\d\d\d\d).mrg (\d+) (\d+) (\w+)')
+def parse_propbank_line(line):
+    matched_fields = PROPBANK_LINE_PARSER.match(line).groups()
+    doc_id, sentence_id, token_id, lemma = matched_fields
+    doc_id, sentence_id, token_id = int(doc_id), int(sentence_id), int(token_id)
+    return doc_id, sentence_id, token_id, lemma
 
 
 def make_coreference_annotated_text(
@@ -76,7 +162,7 @@ def make_coreference_annotated_text(
     doc_id
 ):
 
-    annotated_doc = AnnotatedDocument(
+    annotated_doc = parc_reader.annotated_document.AnnotatedDocument(
         tokens, sentences, 
         {'coreferences':coreferences, 'mentions': mentions},
         doc_id=doc_id
@@ -108,30 +194,41 @@ def read_bbn_entity_types(entity_types_path=BBN_ENTITY_TYPES_DIR, limit=None):
     annotated_docs = {}
     for path in t4k.ls(entity_types_path):
 
-        annotated_docs.update(
-            parse_bbn_entity_types_file(open(path).read(), limit))
+        annotated_docs_to_add, hit_limit = parse_bbn_entity_types_file(
+            open(path).read(), limit)
+        annotated_docs.update(annotated_docs_to_add)
+
+        # Stop if we hit the limit
+        if hit_limit:
+            return annotated_docs
 
         # Can stop early for debugging purposes
-        doc_id = max(annotated_docs.keys())
-        if limit is not None and doc_id == limit:
-            return annotated_docs
+        #doc_id = max(annotated_docs.keys())
+        #if limit is not None and doc_id == limit:
+        #    return annotated_docs
 
     return annotated_docs
 
 
 
 def parse_bbn_entity_types_file(xml_string, limit=None):
+    xml_string = xml_string.replace(
+        'vic<ENAMEX TYPE="PER_DESC">e pres</ENAMEX>ident',
+        '<ENAMEX TYPE="PER_DESC">vice president</ENAMEX>'
+    )
     xml_tree = bs4.BeautifulSoup(xml_string, 'lxml')
     annotated_docs = {}
+    hit_limit = False
     for doc_tag in xml_tree.find_all('doc'):
         doc = parse_entity_type_doc(doc_tag)
 
-        if limit is not None and doc.doc_id > limit:
-            return annotated_docs
+        if limit is not None and doc.doc_id >= limit:
+            hit_limit = True
+            return annotated_docs, hit_limit
 
         annotated_docs[doc.doc_id] = doc
 
-    return annotated_docs
+    return annotated_docs, hit_limit
 
 
 
@@ -175,7 +272,7 @@ def parse_entity_type_doc(doc_tag):
             min_id, max_id = min(token_ids), max(token_ids)
             entity.add_token_range((min_id, max_id+1))
 
-    return AnnotatedDocument(
+    return parc_reader.annotated_document.AnnotatedDocument(
         tokens=tokens, annotations={'entities':entities}, doc_id=doc_id)
 
 
@@ -235,7 +332,7 @@ class AutoIncrementer(object):
         return self.pointer - 1
 
 
-def read_coreference_sentences(path=BNP_SENTENCES_PATH, limit=None):
+def read_coreference_sentences_from_disk(path=BNP_SENTENCES_PATH, limit=None):
     print "Reading BBN sentences.  This will take a minute..."
     documents = {}
     state = 'root'
@@ -251,8 +348,8 @@ def read_coreference_sentences(path=BNP_SENTENCES_PATH, limit=None):
                 # We are starting a new document
                 doc_id = parse_doc_id(line)
 
-                # Can stop early for debugging purposes
-                if limit is not None and doc_id > limit:
+                # Can stop early
+                if limit is not None and doc_id >= limit:
                     return documents
 
                 state = 'in_doc'
@@ -313,6 +410,7 @@ def read_coreference_sentences(path=BNP_SENTENCES_PATH, limit=None):
     return documents
 
 
+WHITESPACE = re.compile('\s+')
 def remove_whitespace(string):
     return WHITESPACE.sub('', string)
 
@@ -323,8 +421,38 @@ def text_match_nowhite(text1, text2):
     return text1_nowhite == text2_nowhite
 
 
+def read_coreference_annotations(
+    path=BNP_PRONOUNS_PATH,
+    subset='all',
+    skip=None,
+    limit=None
+):
+    coref_sentences_by_doc = read_coreference_sentences_from_disk(limit=limit)
+    coref_info_by_doc = read_coreference_information_from_disk(limit=limit)
 
-def read_coreference_annotations(path=BNP_PRONOUNS_PATH, limit=None):
+    coreference_annotated_docs = {}
+    for doc_id in parc_reader.parc_dataset.iter_doc_num(subset, skip, limit):
+
+        try:
+            sentences = coref_sentences_by_doc[doc_id]
+            coreferences, mentions = coref_info_by_doc[doc_id]
+        except KeyError:
+            continue
+
+        # Build the coreference-annotated document from the coreference
+        # information that has been loaded from disk
+        coreference_annotated_docs[doc_id] = make_coreference_annotated_text(
+            sentences['tokens'],
+            sentences['sentences'],
+            coreferences,
+            mentions,
+            doc_id
+        )
+
+    return coreference_annotated_docs
+
+
+def read_coreference_information_from_disk(path=BNP_PRONOUNS_PATH, limit=None):
     parsed_docs = parse_coreference_annotations(open(path).read(), limit)
     annotations_by_doc = assemble_all_coreference_annotations(parsed_docs)
     return annotations_by_doc
@@ -426,16 +554,17 @@ def parse_coreference_annotations(text_to_parse, limit=None):
     state = 'root'
     documents = {}
 
-    for i, line in enumerate(text_to_parse.split('\n')):
+    for i, line in enumerate(t4k.skip_blank(text_to_parse.split('\n'))):
 
         line = line.rstrip()
 
         if state == 'root':
+
             if line[0] == '(':
                 doc_id = parse_doc_id(line)
 
                 # Can stop early for debugging purposes
-                if limit is not None and doc_id > limit:
+                if limit is not None and doc_id >= limit:
                     return documents
 
                 state = 'in_doc'
@@ -455,7 +584,7 @@ def parse_coreference_annotations(text_to_parse, limit=None):
                 state = 'root'
 
             elif line == '    (':
-                state = 'in_reference'
+                state = 'in_coreference'
                 coreference = []
                 coreferences.append(coreference)
 
@@ -483,6 +612,9 @@ def parse_coreference_annotations(text_to_parse, limit=None):
                     'coreference chain.  Got "%s" on line %d.' % (line, i)
                 )
 
+        else:
+            raise ValueError('Unexpected state: %s.' % state)
+
     if state != 'root':
         raise ValueError(
             'Unexpected end of file.  Expected to be at root state, '
@@ -495,7 +627,8 @@ def parse_coreference_annotations(text_to_parse, limit=None):
 
 def correct_token_offset_error(mention):
     mention['token_span'] = parc_reader.spans.TokenSpan([
-        (start - 1, end - 1) for start, end in mention['token_span']
+        (sent_id, start - 1, end - 1) 
+        for sent_id, start, end in mention['token_span']
     ])
 
 

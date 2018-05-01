@@ -40,10 +40,80 @@ def test_read_parc_file():
 
     print 'num_attributions ok'
 
+    constituent = doc.sentences[0]
+    found_constituent_path = [constituent['constituent_type']]
+    while len(constituent['constituent_children']) > 0:
+        constituent = constituent['constituent_children'][0]
+        found_constituent_path.append(constituent['constituent_type'])
+    expected_constituent_path = ['s', 's-tpc-1', 'np-sbj', 'np', 'np', 'token']
+
+    condition = (found_constituent_path==expected_constituent_path)
+    assert condition, 'incorrect constituency tree'
+
+    # Get the first constituent that has a token as its first direct child
+    constituent = doc.sentences[0]
+    first_child = constituent['constituent_children'][0]
+    while first_child['constituent_type'] != 'token':
+        constituent = first_child
+        first_child = constituent['constituent_children'][0]
+    found_token_span = constituent['token_span']
+
+    expected_token_span = [(0,0,2)]
+    condition = found_token_span == expected_token_span
+    assert condition, 'incorrect token span'
+    print 'fist noun-phrase token span ok'
+
+    # Check that tokens have attribution information 
+    for token in  doc.get_tokens(constituent['token_span']):
+        attribution = token['attributions'][0]
+        expected_attr_id = 'wsj_0003_Attribution_relation_level.xml_set_1'
+        condition = attribution['id'] == expected_attr_id
+        assert condition, 'incorrect attribution on token'
+        print 'attribution id on token ok'
+        condition = attribution['roles'][0] == 'content'
+        assert condition, 'incorrect attribution role on token'
+        print 'attribution role on token ok'
+        condition = len(token['attributions']) == 1
+        assert condition, 'incorrect number of attributions on token'
+        print 'number of attributions on token ok'
+        condition = len(attribution['roles']) == 1
+        assert condition, 'incorrect number of attributions on token'
+        print 'number of roles in attribution ok'
+
+    found_token_span = doc.sentences[0]['token_span']
+    expected_token_span = [(None,0,36)]
+    condition = found_token_span == expected_token_span
+    assert condition, 'incorrect token span'
+    print 'fist sentence token span ok'
+
+    attribution_id = 'wsj_0003_PDTB_annotation_level.xml_set_0'
+    attribution = doc.annotations['attributions'][attribution_id]
+    expected_spans = {
+        'content': [(1, 0, 29)],
+        'source': [(1, 29, 30)],
+        'cue': [(1, 30, 31)]
+    }
+    for role in attribution.ROLES:
+        condition = attribution[role] == expected_spans[role]
+        assert condition, 'incorrect span for attribution[%s]' % role
+        print 'span for attribution[%s] ok' % role
+
+    found_pos = [t['pos'] for t in doc.get_sentence_tokens(1)]
+    expected_pos = [
+        'DT', 'NN', 'NN', 'COLON', 'NN', 'COLON', 'VBZ', 'RB', 'JJ', 'IN', 
+        'PRP', 'VBZ', 'DT', 'NNS', 'COLON', 'IN', 'RB', 'JJ', 'NNS', 'TO', 
+        'PRP', 'VBG', 'NNS', 'WDT', 'VBP', 'RP', 'NNS', 'JJ', 'COLON', 'NNS', 
+        'VBD', 'PKT'
+    ]
+    condition = found_pos == expected_pos
+    assert condition, 'incorrect parts of speech in sentence 1'
+    print 'parts of speech in sentence 1 ok'
+    
+
     return doc
 
 
-def read_parc_file(parc_xml, include_nested=False):
+def read_parc_file(parc_xml, doc_id=None, include_nested=False):
     """
     This reads in annotation information from parc xml files.  
     It includes the following annotations:
@@ -60,10 +130,12 @@ def read_parc_file(parc_xml, include_nested=False):
     """
     soup = Soup(parc_xml)
     sentence_wrapper_tags = soup.find_all('sentence')
-    annotated_doc = parc_reader.annotated_document.AnnotatedDocument()
+    annotated_doc = parc_reader.annotated_document.AnnotatedDocument(
+        doc_id=doc_id)
     all_attributions = []
-    for sentence_wrapper_tag in sentence_wrapper_tags:
-        real_sentence_tag = sentence_wrapper_tag.contents[0]
+    print 'doc_id', doc_id
+    for sentence_id, sentence_wrapper_tag in enumerate(sentence_wrapper_tags):
+        real_sentence_tag = first_non_text_child(sentence_wrapper_tag)
         sentence, attributions = recursively_parse(
             real_sentence_tag, annotated_doc)
         all_attributions.extend(attributions)
@@ -74,11 +146,22 @@ def read_parc_file(parc_xml, include_nested=False):
 
     # Make non-sentence constituents use sentence-relative addressing
     for sentence in annotated_doc.sentences:
-        for child in sentence['constituency_children']:
+        for child in sentence['constituent_children']:
             child.relativize(annotated_doc)
 
     return annotated_doc
 
+
+def non_text_children(parent):
+    for child in parent.contents:
+        if child.name:
+            yield child
+
+
+def first_non_text_child(parent):
+    for child in parent.contents:
+        if child.name:
+            return child
 
 
 def stitch_attributions(attribution_specs, annotated_doc):
@@ -117,15 +200,14 @@ def recursively_parse(tag, annotated_doc, depth=0):
     # Each constituent is modelled as a span that has direct references to its
     # children.  Then need to be modelled as absolute spans at first.
     node = parc_reader.spans.Constituency({
-        'is_token': False,
-        'constituency_node_type': node_type
+        'constituent_type': node_type
     }, absolute=True, **tag.attrs)
 
     # We'll capture attributions from children
     attributions = []
 
     # Parse the children
-    for child_tag in tag.contents:
+    for child_tag in non_text_children(tag):
 
         # We shouldn't encounter attributions as direct children of internal
         # constituency nodes.
@@ -138,6 +220,7 @@ def recursively_parse(tag, annotated_doc, depth=0):
         # Handle parsing child tokens
         elif child_tag.name.lower() == 'word':
             child_node = parse_token(child_tag)
+            child_node['sentence_id'] = len(annotated_doc.sentences)
             child_attributions = child_node['attributions']
 
             abs_id = annotated_doc.add_token(child_node)
@@ -148,11 +231,12 @@ def recursively_parse(tag, annotated_doc, depth=0):
 
             # As usual, we only want to provide a pointer to tokens, but for
             # consistency in traversing the constituency tree, the token should
-            # appear in the node's constituency_children list.  We provide only
+            # appear in the node's constituent_children list.  We provide only
             # a stub to create the link
-            node['constituency_children'].append(
+            node['constituent_children'].append(
                 parc_reader.spans.Constituency({
-                    'constituency_node_type': 'token',
+                    'constituent_type': 'token',
+                    'sentence_id': len(annotated_doc.sentences),
                     'token_span': [(None, abs_id, abs_id+1)]
                 }, absolute=True)
             )
@@ -163,16 +247,16 @@ def recursively_parse(tag, annotated_doc, depth=0):
                 child_tag, annotated_doc, depth+1)
 
             # Refuse children that are <none> tags
-            if child_node['constituency_node_type'] == 'none':
+            if child_node['constituent_type'] == 'none':
                 continue
 
             # Refuse children that themselves have no children, depste not
             # being tokens.
-            if len(child_node['constituency_children']) == 0:
+            if len(child_node['constituent_children']) == 0:
                 continue
 
             node['token_span'].add_token_ranges(child_node['token_span'])
-            node['constituency_children'].append(child_node)
+            node['constituent_children'].append(child_node)
 
         attributions.extend(child_attributions)
 
@@ -209,7 +293,7 @@ def parse_token(tag):
     node['attributions'] = []
 
     # Parse any attribution tags
-    for attr_tag in tag.contents:
+    for attr_tag in non_text_children(tag):
 
         # Parse attributions.  Bind them directly to the node and keep as list.
         node['attributions'].append(parse_attribution(attr_tag))

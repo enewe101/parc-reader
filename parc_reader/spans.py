@@ -42,21 +42,21 @@ class Constituency(Span):
 
     def __init__(self, *args, **kwargs):
         super(Constituency, self).__init__(*args, **kwargs)
-        if 'constituency_children' not in self:
-            self['constituency_children'] = []
+        if 'constituent_children' not in self:
+            self['constituent_children'] = []
 
 
     def accomodate_inserted_token(self, abs_id, sentence_id, rel_id):
         super(Constituency, self).accomodate_inserted_token(
             abs_id, sentence_id, rel_id)
 
-        for child in self['constituency_children']:
+        for child in self['constituent_children']:
             child.accomodate_inserted_token(abs_id, sentence_id, rel_id)
 
 
     def relativize(self, doc):
         super(Constituency, self).relativize(doc)
-        for child in self['constituency_children']:
+        for child in self['constituent_children']:
             child.relativize(doc)
 
 
@@ -74,12 +74,15 @@ class Attribution(dict):
         super(Attribution, self).__init__(template, **kwargs)
         self.initialize_spans(absolute)
 
-
     def initialize_spans(self, absolute):
         for span_type in self.ROLES:
             span = self.pop(span_type, [])
             self[span_type] = TokenSpan(span, absolute=absolute)
 
+    def accomodate_inserted_token(self, abs_id, sentence_id, rel_id):
+        for span_type in self.ROLES:
+            self[span_type].accomodate_inserted_token(
+                abs_id, sentence_id, rel_id)
 
     def relativize(self, doc):
         for span_type in self.ROLES:

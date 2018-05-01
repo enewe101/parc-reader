@@ -106,7 +106,7 @@ def load_parc_doc(doc_num):
     annotations
     """
     return parc_reader.new_parc_annotated_text.read_parc_file(
-        open(get_parc_path(doc_num)).read()
+        open(get_parc_path(doc_num)).read(), doc_num
     )
 
 
@@ -121,8 +121,12 @@ def load_article(doc_num):
         corenlp_xml, parc_xml, raw_txt)
 
 
-def iter_doc_num(subset='train', limit=None):
+def iter_doc_num(subset='train', skip=None, limit=None):
     """
+    Provides iteration over named ranges of documents.  The iterator yields the
+    document IDs only, not the documents themselves.  Allows you to
+    individually select the training, testing, or development subsets, or to
+    select all document numbers.
     """
     if subset == 'train':
         start = 0; stop = 2300
@@ -133,13 +137,17 @@ def iter_doc_num(subset='train', limit=None):
     elif subset == 'all':
         start = 0; stop = 2500
 
+    if skip is not None:
+        start = max(skip, start)
+
+    if limit is not None:
+        stop = min(limit, stop)
+
     for doc_num in range(start, stop):
-        if limit is not None and doc_num > limit:
-            return
         yield doc_num
 
 
-def iter_parc_docs(subset='train', limit=None):
+def iter_parc_docs(subset='train', skip=None, limit=None):
     """
     Yields all parc files, parsed to surface tokenization, sentence splitting, 
     constituence parse structure, and attributions.
@@ -148,17 +156,17 @@ def iter_parc_docs(subset='train', limit=None):
         'train', 'test', 'dev', or 'all.
 
     """
-    for doc_num in iter_doc_num(subset, limit=limit):
+    for doc_num in iter_doc_num(subset, skip=skip, limit=limit):
         doc = try_do(load_parc_doc, doc_num)
         if doc is not None:
             yield doc_num, doc
 
 
-def read_all_parc_files(subset='train', limit=None):
+def read_all_parc_files(subset='train', skip=None, limit=None):
     print 'Reading PARC3 files.  This will take a minute...'
     return {
         doc_num : doc
-        for doc_num, doc in iter_parc_docs(subset, limit=limit)
+        for doc_num, doc in iter_parc_docs(subset, skip=skip, limit=limit)
     }
 
 
