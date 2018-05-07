@@ -15,15 +15,15 @@ def get_article_num(article_fname):
     return int(ARTICLE_NUM_MATCHER.search(article_fname).group(1))
 
 
-def get_parc_fname(article_num):
-    return 'wsj_%s' % str(article_num).zfill(4)
+def get_parc_fname(doc_num):
+    return 'wsj_%s' % str(doc_num).zfill(4)
 
 
-def get_raw_path(article_num):
-    fname = get_parc_fname(article_num)
+def get_raw_path(doc_num):
+    fname = get_parc_fname(doc_num)
 
-    # Determine the subdir by getting the hundreds from the article_num
-    prefix_digits = article_num / 100
+    # Determine the subdir by getting the hundreds from the doc_num
+    prefix_digits = doc_num / 100
     if prefix_digits < 23:
         raw_dir = SETTINGS.RAW_TRAIN_DIR
     elif prefix_digits < 24:
@@ -40,27 +40,27 @@ def get_raw_path(article_num):
     return os.path.join(raw_dir, fname)
 
 
-def raw_article_exists(article_num):
+def raw_article_exists(doc_num):
     try:
-        open(get_raw_path(article_num))
+        open(get_raw_path(doc_num))
     except IOError:
         return False
     return True
 
 
-def corenlp_article_exists(article_num):
+def corenlp_article_exists(doc_num):
     try:
-        open(get_corenlp_path(article_num))
+        open(get_corenlp_path(doc_num))
     except IOError:
         return False
     return True
 
 
-def get_corenlp_path(article_num):
-    fname = get_parc_fname(article_num)
+def get_corenlp_path(doc_num):
+    fname = get_parc_fname(doc_num)
 
-    # Determine the subdir by getting the hundreds from the article_num
-    prefix_digits = article_num / 100
+    # Determine the subdir by getting the hundreds from the doc_num
+    prefix_digits = doc_num / 100
     if prefix_digits < 23:
         corenlp_dir = SETTINGS.CORENLP_TRAIN_DIR
     elif prefix_digits < 24:
@@ -77,13 +77,13 @@ def get_corenlp_path(article_num):
     return os.path.join(corenlp_dir, fname + '.xml')
 
 
-def get_parc_path(article_num):
+def get_parc_path(doc_num):
 
     # Get the actual filename based on the article number
-    fname = get_parc_fname(article_num)
+    fname = get_parc_fname(doc_num)
 
-    # Determine the subdir by getting the hundreds from the article_num
-    prefix_digits = article_num / 100
+    # Determine the subdir by getting the hundreds from the doc_num
+    prefix_digits = doc_num / 100
     if prefix_digits < 23:
         parc_dir = SETTINGS.PARC_TRAIN_DIR
     elif prefix_digits < 24:
@@ -100,21 +100,33 @@ def get_parc_path(article_num):
     return os.path.join(parc_dir, subsubdir, fname + '.xml')
 
 
-def load_article(article_num):
+def load_parc_doc(doc_num):
+    """
+    Loads a parc file into memory, but does not load the associated corenlp 
+    annotations
+    """
+    return parc_reader.new_parc_annotated_text.read_parc_file(
+        open(get_parc_path(doc_num)).read(), doc_num
+    )
 
-    parc_xml = open(get_parc_path(article_num)).read()
-    corenlp_xml = open(get_corenlp_path(article_num)).read()
-    raw_txt = open(get_raw_path(article_num)).read()
+
+
+def load_article(doc_num):
+
+    parc_xml = open(get_parc_path(doc_num)).read()
+    corenlp_xml = open(get_corenlp_path(doc_num)).read()
+    raw_txt = open(get_raw_path(doc_num)).read()
 
     return parc_reader.new_reader.ParcCorenlpReader(
         corenlp_xml, parc_xml, raw_txt)
 
 
-def iter_articles(subset='train'):
+def iter_doc_num(subset='train', skip=None, limit=None):
     """
-    Generator that yields all articles in the dataset, according to the subset
-    specified.  ``subset`` can be ``'train'``, ``'test'``, ``'dev'``, or
-    ``'all'``.
+    Provides iteration over named ranges of documents.  The iterator yields the
+    document IDs only, not the documents themselves.  Allows you to
+    individually select the training, testing, or development subsets, or to
+    select all document numbers.
     """
     if subset == 'train':
         start = 0; stop = 2300
@@ -125,13 +137,56 @@ def iter_articles(subset='train'):
     elif subset == 'all':
         start = 0; stop = 2500
 
-    for article_num in range(start, stop):
-        try:
-            article = load_article(article_num)
-        except (IOError, ValueError):
-            continue
+    if skip is not None:
+        start = max(skip, start)
 
-        yield get_parc_fname(article_num), article
+    if limit is not None:
+        stop = min(limit, stop)
+
+    for doc_num in range(start, stop):
+        yield doc_num
+
+
+def iter_parc_docs(subset='train', skip=None, limit=None):
+    """
+    Yields all parc files, parsed to surface tokenization, sentence splitting, 
+    constituence parse structure, and attributions.
+    Specify a subset of the dataset; can be:
+
+        'train', 'test', 'dev', or 'all.
+
+    """
+    for doc_num in iter_doc_num(subset, skip=skip, limit=limit):
+        doc = try_do(load_parc_doc, doc_num)
+        if doc is not None:
+            yield doc_num, doc
+
+
+def read_all_parc_files(subset='train', skip=None, limit=None):
+    print 'Reading PARC3 files.  This will take a minute...'
+    return {
+        doc_num : doc
+        for doc_num, doc in iter_parc_docs(subset, skip=skip, limit=limit)
+    }
+
+
+def iter_articles(subset='train'):
+    """
+    Generator that yields all articles in the dataset, according to the subset
+    specified.  ``subset`` can be ``'train'``, ``'test'``, ``'dev'``, or
+    ``'all'``.
+    """
+    for doc_num in iter_doc_num(subset):
+        doc = try_do(load_article, doc_num)
+        if doc is not None:
+            yield get_parc_fname(doc_num), doc
+
+
+def try_do(func, *args, **kwargs):
+    try:
+        return func(*args, **kwargs)
+    except (IOError, ValueError):
+        return None
 
 
 def load_corpus_stats():
@@ -162,9 +217,9 @@ def show_attributions(attribution_ids, limit=None):
 
     # Load the articles that contain the desired attributions
     articles = {}
-    for article_num in article_nums:
-        print 'loading article %d' % article_num
-        articles[article_num] = load_article(article_num)
+    for doc_num in article_nums:
+        print 'loading article %d' % doc_num
+        articles[doc_num] = load_article(doc_num)
 
     # Get the real attribution objects for the desired attributions
     attributions = [
@@ -271,24 +326,24 @@ class ParcDataset(object):
         else:
             article_nums = list(article_nums)
 
-        for article_num in article_nums:
+        for doc_num in article_nums:
 
             # If applicable, check target num_attributions was reached
             if num_attributions is not None:
                 if len(self._attributions) >= num_attributions:
                     break
 
-            fname = 'wsj_%s' % str(article_num).zfill(4)
+            fname = 'wsj_%s' % str(doc_num).zfill(4)
             print 'reading %s...' % fname
 
             # Load each article, but tolerate missing files.  There are
             # frequently holes in the file name series.
             try:
-                article = load_article(article_num)
+                article = load_article(doc_num)
             except IOError:
                 continue
 
-            self.articles[article_num] = article
+            self.articles[doc_num] = article
 
             for sentence in article.sentences:
 
@@ -296,7 +351,7 @@ class ParcDataset(object):
 
                     attribution = sentence['attributions'][attribution_id]
                     back_pointer = {
-                        'article_num': article_num, 
+                        'doc_num': doc_num, 
                         'attribution_id': attribution_id
                     }
 
@@ -325,7 +380,7 @@ class ParcDataset(object):
                 for example in self.cues[cue]:
                     attribution_id = example['attribution_id']
                     print attribution_id
-                    article = self.articles[example['article_num']]
+                    article = self.articles[example['doc_num']]
 
                     attribution = article.attributions[attribution_id]
                     sentence_ids = attribution.get_sentence_ids()
@@ -402,26 +457,26 @@ class ParcDataset(object):
         dataset reader.
         '''
         for attribution_spec in self._attributions:
-            article = self.articles[attribution_spec['article_num']]
+            article = self.articles[attribution_spec['doc_num']]
             attribution = article.attributions[
                 attribution_spec['attribution_id']]
             yield attribution, article
 
 
-    def get_attribution(self, article_num, attribution_id):
-        return self.articles[article_num].attributions[attribution_id]
+    def get_attribution(self, doc_num, attribution_id):
+        return self.articles[doc_num].attributions[attribution_id]
 
 
     def get_attribution_html(
         self,
-        article_num,
+        doc_num,
         attribution_id,
         resolve_pronouns=False
     ):
         '''
         Delegate to the method on the underlying ParcCorenlpReader.
         '''
-        article = self.articles[article_num]
+        article = self.articles[doc_num]
         attribution = article.attributions[attribution_id]
         return article.get_attribution_html(attribution, resolve_pronouns)
 
