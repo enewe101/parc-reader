@@ -42,8 +42,8 @@ def read_bnp_pronoun_dataset(
         try:
             coreference_annotated_doc = coreference_annotated_docs[doc_id]
             attribution_annotated_doc = attributions_by_doc[doc_id]
-            entity_annotated_doc = entity_annotated_docs[doc_id]
-            propbank_verbs = propbank_verbs_by_doc[doc_id]
+            #entity_annotated_doc = entity_annotated_docs[doc_id]
+            #propbank_verbs = propbank_verbs_by_doc[doc_id]
         except KeyError:
             print 'Could not create doc_id %d' % doc_id
             continue
@@ -216,10 +216,11 @@ def parse_bbn_entity_types_file(xml_string, limit=None):
         'vic<ENAMEX TYPE="PER_DESC">e pres</ENAMEX>ident',
         '<ENAMEX TYPE="PER_DESC">vice president</ENAMEX>'
     )
-    xml_tree = bs4.BeautifulSoup(xml_string, 'lxml')
+    xml_tree = bs4.BeautifulSoup(xml_string, 'xml')
     annotated_docs = {}
     hit_limit = False
     for doc_tag in xml_tree.find_all('doc'):
+        print doc_tag.name
         doc = parse_entity_type_doc(doc_tag)
 
         if limit is not None and doc.doc_id >= limit:

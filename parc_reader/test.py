@@ -1,5 +1,113 @@
 from unittest import main, TestCase
 from parc_reader.new_reader import ParcCorenlpReader, ROLES
+import parc_reader
+
+
+class TestReadAllAnnotations(TestCase):
+
+    def test_read_all_annotations(self):
+        dataset = parc_reader.bnp_pronouns_reader.read_bnp_pronoun_dataset(
+            skip=0,limit=20)
+        print len(dataset)
+
+
+class TestReadParcFile(TestCase):
+
+    def test_read_parc_file(self):
+        first_interesting_article = 3
+        path = parc_reader.parc_dataset.get_parc_path(first_interesting_article)
+        doc = parc_reader.new_parc_annotated_text.read_parc_file(
+            open(path).read())
+
+        annotation_id = 'wsj_0003_Attribution_relation_level.xml_set_1'
+        annotation = doc.annotations['attributions'][annotation_id]
+
+        condition = annotation['content'] == [(0,0,32)]
+        self.assertTrue(condition, 'incorrect attribution content')
+
+        found_content_text = doc.get_tokens(annotation['content']).text()
+        expected_content_text = (
+            "A form of asbestos once used to make Kent cigarette filters has "
+            "caused a high percentage of cancer deaths among a group of workers "
+            "exposed to it more than 30 years ago"
+        )
+
+        condition = found_content_text == expected_content_text
+        self.assertTrue(condition, 'incorrect attribution content text')
+
+        num_attributions = len(doc.annotations['attributions'])
+        expected_num_attributions = 13
+        condition = num_attributions == expected_num_attributions,
+        self.assertTrue(condition, 'incorrect number of attributions found')
+
+        constituent = doc.sentences[0]
+        found_constituent_path = [constituent['constituent_type']]
+        while len(constituent['constituent_children']) > 0:
+            constituent = constituent['constituent_children'][0]
+            found_constituent_path.append(constituent['constituent_type'])
+        expected_constituent_path = ['s', 's-tpc-1', 'np-sbj', 'np', 'np', 'token']
+
+        condition = (found_constituent_path==expected_constituent_path)
+        self.assertTrue(condition, 'incorrect constituency tree')
+
+        # Get the first constituent that has a token as its first direct child
+        constituent = doc.sentences[0]
+        first_child = constituent['constituent_children'][0]
+        while first_child['constituent_type'] != 'token':
+            constituent = first_child
+            first_child = constituent['constituent_children'][0]
+        found_token_span = constituent['token_span']
+
+        expected_token_span = [(0,0,2)]
+        condition = found_token_span == expected_token_span
+        self.assertTrue(condition, 'incorrect token span')
+
+        # Check that tokens have attribution information 
+        for token in  doc.get_tokens(constituent['token_span']):
+            attribution = token['attributions'][0]
+            expected_attr_id = 'wsj_0003_Attribution_relation_level.xml_set_1'
+            condition = attribution['id'] == expected_attr_id
+            self.assertTrue(condition, 'incorrect attribution on token')
+            condition = attribution['roles'][0] == 'content'
+            self.assertTrue(condition, 'incorrect attribution role on token')
+            condition = len(token['attributions']) == 1
+            self.assertTrue(
+                condition, 'incorrect number of attributions on token')
+            condition = len(attribution['roles']) == 1
+            self.assertTrue(
+                condition, 'incorrect number of attributions on token')
+
+        found_token_span = doc.sentences[0]['token_span']
+        expected_token_span = [(None,0,36)]
+        condition = found_token_span == expected_token_span
+        self.assertTrue(condition, 'incorrect token span')
+
+        attribution_id = 'wsj_0003_PDTB_annotation_level.xml_set_0'
+        attribution = doc.annotations['attributions'][attribution_id]
+        expected_spans = {
+            'content': [(1, 0, 29)],
+            'source': [(1, 29, 30)],
+            'cue': [(1, 30, 31)]
+        }
+        for role in attribution.ROLES:
+            condition = attribution[role] == expected_spans[role]
+            self.assertTrue(
+                condition, 'incorrect span for attribution[%s]' % role)
+
+        found_pos = [t['pos'] for t in doc.get_sentence_tokens(1)]
+        expected_pos = [
+            'DT', 'NN', 'NN', 'COLON', 'NN', 'COLON', 'VBZ', 'RB', 'JJ', 'IN', 
+            'PRP', 'VBZ', 'DT', 'NNS', 'COLON', 'IN', 'RB', 'JJ', 'NNS', 'TO', 
+            'PRP', 'VBG', 'NNS', 'WDT', 'VBP', 'RP', 'NNS', 'JJ', 'COLON', 'NNS', 
+            'VBD', 'PKT'
+        ]
+        condition = found_pos == expected_pos
+        self.assertTrue(condition, 'incorrect parts of speech in sentence 1')
+
+        return doc
+
+
+
 
 def get_test_texts(article_num, include_parc=True):
     texts = []
