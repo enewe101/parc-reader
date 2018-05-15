@@ -100,13 +100,13 @@ def get_parc_path(doc_num):
     return os.path.join(parc_dir, subsubdir, fname + '.xml')
 
 
-def load_parc_doc(doc_num):
+def load_parc_doc(doc_num, include_nested=True):
     """
     Loads a parc file into memory, but does not load the associated corenlp 
     annotations
     """
     return parc_reader.new_parc_annotated_text.read_parc_file(
-        open(get_parc_path(doc_num)).read(), doc_num
+        open(get_parc_path(doc_num)).read(), doc_num, include_nested
     )
 
 
@@ -147,7 +147,7 @@ def iter_doc_num(subset='train', skip=None, limit=None):
         yield doc_num
 
 
-def iter_parc_docs(subset='train', skip=None, limit=None):
+def iter_parc_docs(subset='train', skip=None, limit=None, include_nested=True):
     """
     Yields all parc files, parsed to surface tokenization, sentence splitting, 
     constituence parse structure, and attributions.
@@ -157,7 +157,7 @@ def iter_parc_docs(subset='train', skip=None, limit=None):
 
     """
     for doc_num in iter_doc_num(subset, skip=skip, limit=limit):
-        doc = try_do(load_parc_doc, doc_num)
+        doc = try_do(load_parc_doc, doc_num, include_nested)
         if doc is not None:
             yield doc_num, doc
 

@@ -42,8 +42,8 @@ def read_bnp_pronoun_dataset(
         try:
             coreference_annotated_doc = coreference_annotated_docs[doc_id]
             attribution_annotated_doc = attributions_by_doc[doc_id]
-            #entity_annotated_doc = entity_annotated_docs[doc_id]
-            #propbank_verbs = propbank_verbs_by_doc[doc_id]
+            entity_annotated_doc = entity_annotated_docs[doc_id]
+            propbank_verbs = propbank_verbs_by_doc[doc_id]
         except KeyError:
             print 'Could not create doc_id %d' % doc_id
             continue
@@ -219,14 +219,11 @@ def parse_bbn_entity_types_file(xml_string, limit=None):
     xml_tree = bs4.BeautifulSoup(xml_string, 'xml')
     annotated_docs = {}
     hit_limit = False
-    for doc_tag in xml_tree.find_all('doc'):
-        print doc_tag.name
+    for doc_tag in xml_tree.find_all('DOC'):
         doc = parse_entity_type_doc(doc_tag)
-
         if limit is not None and doc.doc_id >= limit:
             hit_limit = True
             return annotated_docs, hit_limit
-
         annotated_docs[doc.doc_id] = doc
 
     return annotated_docs, hit_limit
@@ -234,13 +231,13 @@ def parse_bbn_entity_types_file(xml_string, limit=None):
 
 
 def parse_entity_type_doc(doc_tag):
-    doc_id = parse_doc_id(doc_tag.find('docno').text.strip())
+    doc_id = parse_doc_id(doc_tag.find('DOCNO').text.strip())
     tokens = []
     entities = {}
 
     for child in doc_tag.contents:
 
-        if child.name == 'docno':
+        if child.name == 'DOCNO':
             continue
 
         if is_text_node(child):
@@ -255,7 +252,7 @@ def parse_entity_type_doc(doc_tag):
         else:
             entity = parc_reader.spans.Span({
                 'id': len(entities),
-                'entity_type': tuple([child.name] + child['type'].split(':')),
+                'entity_type': tuple([child.name] + child['TYPE'].split(':')),
                 'text': child.text.strip()
             }, absolute=True)
             entities[entity['id']] = entity

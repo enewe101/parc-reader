@@ -31,11 +31,12 @@ def read_parc_file(parc_xml, doc_id=None, include_nested=False):
     annotated_doc = parc_reader.annotated_document.AnnotatedDocument(
         doc_id=doc_id)
     all_attributions = []
-    print 'doc_id', doc_id
+    #print 'doc_id', doc_id
     for sentence_id, sentence_wrapper_tag in enumerate(sentence_wrapper_tags):
-        real_sentence_tag = first_non_text_child(sentence_wrapper_tag)
+        real_sentence_tag = parc_reader.utils.first_non_text_child(
+            sentence_wrapper_tag)
         sentence, attributions = recursively_parse(
-            real_sentence_tag, annotated_doc)
+            real_sentence_tag, annotated_doc, include_nested=include_nested)
         all_attributions.extend(attributions)
 
     # Assemble attribution fragments and use sentence-relative addressing
@@ -49,17 +50,6 @@ def read_parc_file(parc_xml, doc_id=None, include_nested=False):
 
     return annotated_doc
 
-
-def non_text_children(parent):
-    for child in parent.contents:
-        if child.name:
-            yield child
-
-
-def first_non_text_child(parent):
-    for child in parent.contents:
-        if child.name:
-            return child
 
 
 def stitch_attributions(attribution_specs, annotated_doc):
@@ -85,7 +75,7 @@ def stitch_attributions(attribution_specs, annotated_doc):
 
 
 
-def recursively_parse(tag, annotated_doc, depth=0):
+def recursively_parse(tag, annotated_doc, depth=0, include_nested=True):
 
     # Make sure we're doing the right thing
     node_type = tag.name.lower()
@@ -105,7 +95,7 @@ def recursively_parse(tag, annotated_doc, depth=0):
     attributions = []
 
     # Parse the children
-    for child_tag in non_text_children(tag):
+    for child_tag in parc_reader.utils.non_text_children(tag):
 
         # We shouldn't encounter attributions as direct children of internal
         # constituency nodes.
@@ -117,7 +107,7 @@ def recursively_parse(tag, annotated_doc, depth=0):
 
         # Handle parsing child tokens
         elif child_tag.name.lower() == 'word':
-            child_node = parse_token(child_tag)
+            child_node = parse_token(child_tag, include_nested)
             child_node['sentence_id'] = len(annotated_doc.sentences)
             child_attributions = child_node['attributions']
 
@@ -142,7 +132,7 @@ def recursively_parse(tag, annotated_doc, depth=0):
         # Handle parsing child internal constituency nodes
         else:
             child_node, child_attributions = recursively_parse(
-                child_tag, annotated_doc, depth+1)
+                child_tag, annotated_doc, depth+1, include_nested)
 
             # Refuse children that are <none> tags
             if child_node['constituent_type'] == 'none':
@@ -160,12 +150,12 @@ def recursively_parse(tag, annotated_doc, depth=0):
 
     node['token_span'].consolidate()
     if depth == 0:
-        annotated_doc.add_sentence(node)
+        annotated_doc.add_sentence(**node)
 
     return node, attributions
 
 
-def parse_token(tag):
+def parse_token(tag, include_nested=True):
     """
     Base case of the recursive parsing of parc xml.  Parsing of a token.
     Calls out to a subroutine to parse any attribution information on the token.
@@ -190,11 +180,12 @@ def parse_token(tag):
     # annotations appear as children in the xml.
     node['attributions'] = []
 
-    # Parse any attribution tags
-    for attr_tag in non_text_children(tag):
-
-        # Parse attributions.  Bind them directly to the node and keep as list.
-        node['attributions'].append(parse_attribution(attr_tag))
+    # Parse any attribution tags.  Ignore nested ones if desired.
+    for attr_tag in parc_reader.utils.non_text_children(tag):
+        attribution = parse_attribution(attr_tag)
+        if not include_nested and 'Nested' in attribution['id']:
+            continue
+        node['attributions'].append(attribution)
 
     return node
 
