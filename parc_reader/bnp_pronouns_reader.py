@@ -4,7 +4,7 @@ import re
 import t4k
 import copy
 import bs4
-from collections import defaultdict
+from collections import defaultdict, Counter
 
 
 BNP_PRONOUNS_PATH = os.path.join(
@@ -83,13 +83,18 @@ def merge_propbank_verbs(annotated_doc, propbank_verbs):
 
     This works by mutating annotated_doc.
     """
-    propbank_verb_tokens = []
-    for sentence_id, token_id, lemma in propbank_verbs:
+    propbank_verb_tokens = {}
+    for verb_id, (sentence_id, token_id, lemma) in enumerate(propbank_verbs):
         token = find_nearest_matching_token(
             annotated_doc, sentence_id, token_id, lemma)
+
+        # It may not be possible to find a match.  Just keep going if so.
+        if token is None: 
+            continue
+
         token['is_propbank_verb'] = True
         token_range = (token['sentence_id'], token['id'], token['id'] + 1)
-        propbank_verb_tokens.append(parc_reader.spans.Span({
+        propbank_verb_tokens[verb_id] = (parc_reader.spans.Span({
             'lemma': lemma,
             'token_span': [token_range]
         }))
@@ -97,9 +102,37 @@ def merge_propbank_verbs(annotated_doc, propbank_verbs):
     annotated_doc.annotations['propbank_verbs'] = propbank_verb_tokens
 
 
-
-MAX_TOKEN_MATCH_DISTANCE = 5
+# TODO: compress this functionality.
+MAX_TOKEN_EXACT_MATCH_DISTANCE = 50
+MAX_TOKEN_NEAR_MATCH_DISTANCE = 10
 def find_nearest_matching_token(annotated_doc, sentence_id, token_id, lemma):
+    """
+    Look for a token having `lemma`, near `(sentence_id, token_id)` in 
+    `annotated_doc`.  First, look for an exact match.  If none is found, accept
+    the closest match (in terms of number of characters in common overlap).
+    """
+    try:
+        return find_nearest_exact_matching_token(
+            annotated_doc, sentence_id, token_id, lemma)
+    except ValueError:
+        return find_closest_near_matching_token(
+            annotated_doc, sentence_id, token_id, lemma)
+
+
+def character_overlap(str1, str2):
+    counts1, counts2 = Counter(str1), Counter(str2)
+    overlap_amount = 0
+    for c in counts1:
+        overlap_amount += min(counts1[c], counts2[c])
+    return overlap_amount / float(max(len(str1), len(str2)))
+
+
+def find_nearest_exact_matching_token(
+    annotated_doc,
+    sentence_id,
+    token_id,
+    lemma
+):
 
     # Absolutize the location that we're expecting the token
     absolute_token_id = annotated_doc.absolutize(
@@ -108,29 +141,101 @@ def find_nearest_matching_token(annotated_doc, sentence_id, token_id, lemma):
 
     token_found = False
     distance = 0
-    while not token_found and distance <= MAX_TOKEN_MATCH_DISTANCE:
+    while not token_found and distance <= MAX_TOKEN_EXACT_MATCH_DISTANCE:
 
-        print 'looking at distance %d' % distance
-
-        check_token_id = absolute_token_id + distance
-        found_lemma = annotated_doc.tokens[check_token_id]['lemma']
-        if parc_reader.annotated_document.is_same_token(lemma, found_lemma):
-            return annotated_doc.tokens[check_token_id]
+        if distance == 6:
+            print annotated_doc.doc_id
+            print lemma
+            print annotated_doc.get_sentence_tokens(sentence_id).text()
+        try:
+            check_token_id = absolute_token_id + distance
+            found_lemma = annotated_doc.tokens[check_token_id]['lemma']
+            if parc_reader.annotated_document.is_same_token(lemma, found_lemma):
+                print 'found at +%d' % check_token_id
+                return annotated_doc.tokens[check_token_id]
+        except IndexError:
+            pass
 
         check_token_id = absolute_token_id - distance
-        found_lemma = annotated_doc.tokens[check_token_id]['lemma']
-        if parc_reader.annotated_document.is_same_token(lemma, found_lemma):
-            return annotated_doc.tokens[check_token_id]
+        if check_token_id >= 0:
+            try:
+                found_lemma = annotated_doc.tokens[check_token_id]['lemma']
+                is_same_token = parc_reader.annotated_document.is_same_token(
+                    lemma, found_lemma)
+                if is_same_token:
+                    print 'found at +%d' % check_token_id
+                    return annotated_doc.tokens[check_token_id]
+            except IndexError:
+                pass
 
         distance += 1
 
+    sentence_text = annotated_doc.get_sentence_tokens(sentence_id).text()
+    sentence_lemmas = ' '.join([
+        t['lemma'] for t in 
+        annotated_doc.get_sentence_tokens(sentence_id)
+    ])
+ 
     raise ValueError(
-        'Could not find a token with lemma %s near token %d in sentence %d.'
-        % (lemma, token_id, sentence_id)
+        'Could not find a token with lemma "%s" near token %d in sentence %d.'
+        '\n\n"%s"'
+        % (lemma, token_id, sentence_id, sentence_lemmas)
     )
 
+def find_closest_near_matching_token(
+    annotated_doc,
+    sentence_id,
+    token_id,
+    lemma
+):
 
+    # Absolutize the location that we're expecting the token
+    absolute_token_id = annotated_doc.absolutize(
+        [(sentence_id, token_id, token_id+1)]
+    )[0][1]
 
+    distance = 0
+    max_overlap = t4k.Max()
+    for distance in range(MAX_TOKEN_NEAR_MATCH_DISTANCE+1):
+
+        try:
+            check_token_id = absolute_token_id + distance
+            check_token = annotated_doc.tokens[check_token_id]
+            if check_token['pos'].startswith('VB'):
+                found_lemma = check_token['lemma']
+                overlap_amount = character_overlap(lemma, found_lemma)
+                max_overlap.add(overlap_amount, check_token_id)
+        except IndexError:
+            pass
+
+        check_token_id = absolute_token_id - distance
+        if check_token_id >= 0:
+            check_token = annotated_doc.tokens[check_token_id]
+            if check_token['pos'].startswith('VB'):
+                found_lemma = annotated_doc.tokens[check_token_id]['lemma']
+                overlap_amount = character_overlap(lemma, found_lemma)
+                max_overlap.add(overlap_amount, check_token_id)
+
+    sentence_lemmas = ' '.join([
+        t['lemma'] for t in 
+        annotated_doc.get_sentence_tokens(sentence_id)
+    ])
+
+    max_overlap_amount, max_overlap_token_id = max_overlap.get()
+
+    # Handle the case where there weren't even any candidates among the tokens
+    # searched.
+    if max_overlap_token_id is None:
+        return None
+
+    token = annotated_doc.tokens[max_overlap_token_id]
+    central_token = annotated_doc.tokens[absolute_token_id]
+    print central_token
+    print ('found max overlap: %.2f %s %s %s: \n\n%s' % (
+        max_overlap_amount, lemma, central_token['lemma'],
+        token['lemma'], sentence_lemmas
+    ))
+    return token
 
 
 

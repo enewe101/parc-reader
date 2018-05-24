@@ -13,6 +13,49 @@ class TestReadAllAnnotations(TestCase):
         print len(dataset)
 
 
+class TestMergingPropbankVerbs(TestCase):
+
+    def setUp(self):
+        self.propbank_verbs_by_doc = (
+            parc_reader.bnp_pronouns_reader.read_propbank_verbs())
+
+    def get_test_docs(self, doc_id):
+        parc_doc = parc_reader.parc_dataset.load_parc_doc(
+            doc_id, include_nested=False)
+        propbank_verbs = self.propbank_verbs_by_doc[doc_id]
+        return parc_doc, propbank_verbs
+
+    def test_several_docs_for_propbank_merging(self):
+        for doc_id in [13, 17, 23, 29, 31, 37]:
+            self.do_test_one_doc_for_propbank_merging(doc_id)
+
+
+    MAX_DISTANCE_FOR_TOKEN_MATCH = 10
+    def do_test_one_doc_for_propbank_merging(self, doc_id):
+
+        parc_doc, propbank_verbs = self.get_test_docs(doc_id)
+        parc_reader.bnp_pronouns_reader.merge_propbank_verbs(
+            parc_doc, propbank_verbs)
+
+        for verb_id, (sentence_id,token_id,lemma) in enumerate(propbank_verbs):
+            matched_token = parc_doc.annotations['propbank_verbs'][verb_id]
+            matched_lemma = matched_token['lemma']
+            matched_location = parc_doc.absolutize(matched_token['token_span'])
+            matched_abs_id = matched_location[0][1]
+            expected_location = parc_doc.absolutize(
+                [(sentence_id, token_id, token_id + 1)])
+            expected_location_abs_id = expected_location[0][1]
+            distance = matched_abs_id - expected_location_abs_id
+            self.assertEqual(lemma, matched_lemma)
+            self.assertTrue(abs(distance) < self.MAX_DISTANCE_FOR_TOKEN_MATCH)
+
+
+
+
+
+
+
+
 class TestTokenSpan(TestCase):
 
     def test_bad_span(self):
@@ -76,8 +119,6 @@ class TestReadParcFile(TestCase):
     # TODO: test token splitting
 
     def setUp(self):
-        first_interesting_article = 3
-        path = parc_reader.parc_dataset.get_parc_path(first_interesting_article)
         self.doc = self.get_test_doc()
 
 

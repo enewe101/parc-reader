@@ -150,7 +150,7 @@ def recursively_parse(tag, annotated_doc, depth=0, include_nested=True):
 
     node['token_span'].consolidate()
     if depth == 0:
-        annotated_doc.add_sentence(**node)
+        annotated_doc.add_sentence(node)
 
     return node, attributions
 
