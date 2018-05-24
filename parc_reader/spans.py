@@ -60,6 +60,23 @@ class Constituency(Span):
             child.relativize(doc)
 
 
+def get_dfs_constituents(node):
+    return parc_reader.utils.get_dfs_sequence(node, get_constituency_children)
+
+
+def get_constituency_children(node):
+    try:
+        return node['constituent_children']
+    except KeyError:
+        if node['constituent_type'] != 'token':
+            raise parc_reader.exceptions.ConstituentIntegrityError(
+                "Constituents that have no children must be of type 'token', "
+                "but this childless constituent is of type '%s'" % 
+                node['constituent_type']
+            )
+        return []
+
+
 
 class Attribution(dict):
 
@@ -117,9 +134,15 @@ class TokenSpan(list):
     ):
         super(TokenSpan, self).__init__()
         self.absolute = absolute
+
+        # Collect together spans to be added.  Tolerate adding no spans, and
+        # tolerate specifying single_range and / or token_span.
         token_span = [] if token_span is None else list(token_span)
         if single_range is not None:
             token_span.append(single_range)
+
+        # Add all the tokens
+        self.consolidated = True
         self.add_token_ranges(token_span)
 
 
@@ -147,39 +170,66 @@ class TokenSpan(list):
         self.replace_with(new_span)
 
 
-
     def add_token_ranges(self, token_ranges):
         for token_range in token_ranges:
-            self.add_token_range(token_range)
+            self.add_token_range(token_range, skip_consolidation=True)
+        self.consolidate()
 
 
-    def add_token_range(self, token_range):
-
-        if len(token_range) == 2:
-            sentence_id = None
+    def _normalize_range(self, token_range):
+        """Handle ommitting sentence_id when specifying a token range."""
+        if len(token_range) == 3:
+            return token_range
+        elif len(token_range) == 2 and self.absolute:
             start, end = token_range
-
-        elif len(token_range) == 3:
-            sentence_id, start, end = token_range
-
+            return None, start, end
         else:
             raise ValueError(
-                'Token ranges must have two or three elements, '
-                'consisting of an optional sentence id, start index, '
-                'and end index.'
+                "Token ranges must take the form `(start_index, end_index)` or "
+                "`(sentence_id, start_index, end_index)`.  Got %s."
+                % str(token_range)
             )
 
+
+    def _validate_range(self, token_range):
+        sentence_id, start, end = token_range
         if self.absolute and sentence_id is not None:
             raise ValueError(
                 'Absolute token ranges should have sentence_id = None.')
         if not self.absolute and sentence_id is None:
             raise ValueError(
                 'Relative token ranges must have an integer sentence_id.')
+        if start >= end:
+            raise ValueError(
+                "The start index of the token range must be less "
+                "than the end index"
+            )
 
-        self.append((sentence_id, start, end))
+
+    def add_token_range(self, token_range, skip_consolidation=False):
+        token_range = self._normalize_range(token_range)
+        self._validate_range(token_range)
+        self._check_if_still_consolidated(token_range)
+        super(TokenSpan, self).append(token_range)
+        if not skip_consolidation:
+            self.consolidate()
+
+
+    def _check_if_still_consolidated(self, token_range):
+        """
+        Check if this token range comes strictly after existing token ranges,
+        in which case consolidation isn't needed.
+        """
+        sentence_id, start, end = token_range
+        if self.num_segments() > 0:
+            last_range_end = self[-1][2]
+            if last_range_end >= start:
+                self.consolidated = False
 
 
     def consolidate(self):
+        if self.consolidated:
+            return
         self.sort()
         new_span = []
         current_range = None
@@ -209,22 +259,39 @@ class TokenSpan(list):
             new_span.append(current_range)
 
         # Replace elements in place
-        self.replace_with(new_span)
+        self._replace_with_consolidated(new_span)
+
+
+    def _replace_with_consolidated(self, token_ranges):
+        """
+        Directly assign token ranges, which are assumed to be already valid and
+        consolidated.
+        """
+        self[:] = token_ranges
 
 
     def replace_with(self, token_ranges, absolute=None):
+        """
+        Assign new token ranges.  Subject ranges to validation and
+        consolidation.
+        """
         self.absolute = self.absolute if absolute is None else absolute
         self[:] = []
         self.add_token_ranges(token_ranges)
 
 
+    def num_segments(self):
+        return super(TokenSpan, self).__len__()
+
+
     def is_single_range(self):
-        return len(self) == 1
+        return self.num_segments() == 1
 
 
     def get_single_range(self):
         if not self.is_single_range():
-            raise NonSingleRangeError('This token span has multiple ranges.')
+            raise parc_reader.exceptions.NonSingleRangeError(
+                'This token span has multiple ranges.')
         return self[0]
 
 
@@ -260,6 +327,9 @@ class TokenSpan(list):
             return (sentence_id, start, end)
 
 
+    def __len__(self):
+        return sum([end-start for _, start, end in self])
+
 
     #def extend(self, iterable):
     #    super(TokenSpan, self).extend(iterable)
@@ -278,7 +348,4 @@ class TokenSpan(list):
     #        selected.extend(choose_from_tokens[start:end])
     #    return parc_reader.token_list.TokenList(selected)
 
-
-class NonSingleRangeError(Exception):
-    pass
 

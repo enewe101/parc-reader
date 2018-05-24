@@ -2,6 +2,7 @@ import re
 import parc_reader
 import t4k
 
+
 class AnnotatedDocument(object):
 
     def __init__(self,
@@ -20,12 +21,6 @@ class AnnotatedDocument(object):
             for sentence in sentences:
                 self.add_sentence(sentence)
 
-        #self.initialize_document(doc)
-        #self.initialize_coreferences(coreferences)
-        #self.initialize_entity_types(entity_types)
-        #self.validate_mention_tokens()
-        #self.initialize_attributions(attributions)
-
 
     def add_token(self, token):
         abs_id = len(self.tokens)
@@ -35,11 +30,46 @@ class AnnotatedDocument(object):
 
 
     def add_sentence(self, sentence):
-        sentence_id = len(self.sentences)
+
+        # Do some validating
+        if 'token_span' not in sentence:
+            raise ValueError("`sentence['token_span']` must be TokenSpan-like")
         sentence = parc_reader.spans.Span(sentence, absolute=True)
+        self.validate_sentence_span(sentence)
+
+        # Add the sentence
+        sentence_id = len(self.sentences)
         sentence['id'] = sentence_id
         self.sentences.append(sentence)
-        
+
+        # Add sentence-relative ids to the tokens for this sentence
+        self.write_relative_token_ids_in_sentence(sentence_id)
+
+
+    def validate_sentence_span(self, sentence):
+
+        _, start, end = sentence['token_span'].get_single_range()
+
+        # The first sentence should start at token zero.
+        if len(self.sentences) == 0:
+            if not start == 0:
+                raise ValueError("First sentence should start with token 0.")
+
+        # Ensure this sentence ends where the last one picked up.
+        else:
+            last_sentence = self.sentences[len(self.sentences) - 1]
+            last_sentence_range = last_sentence['token_span'].get_single_range()
+            _, last_start, last_end = last_sentence_range
+            if start != last_end:
+                raise ValueError(
+                    "Non-adjacent sentences were added consecutively. "
+                    "Sentences should be added in order, so that the first "
+                    "token of a sentence being added should follow right after "
+                    "the last token of the previously added sentence.  The "
+                    "previously added sentence ended at token %d, and the "
+                    "currently-added sentence starts at token %d"
+                    % (last_end-1, start)
+                )
 
 
     def get_sentence_tokens(self, sentence_id):
@@ -135,21 +165,6 @@ class AnnotatedDocument(object):
         return new_token_ranges
 
 
-    def initialize_attributions(self, attributions):
-        paired_sentences = zip(attributions['sentences'], self.sentences)
-        for new_sentence, existing_sentence in paired_sentences:
-            new_text = ' '.join([t['text'] for t in new_sentence['tokens']])
-            existing_text = existing_sentence['tokens'].text()
-            if not text_match_nowhite(new_text, existing_text):
-
-                print self.doc_id
-                print existing_sentence['id']
-                print new_text
-                print existing_text
-
-                print '\n\t' + '-'*30 + '\n'
-
-
     def merge_tokens(
         self,
         other,
@@ -229,6 +244,7 @@ class AnnotatedDocument(object):
         return token, remainder_token
 
 
+    # TODO: alter this to use the new implementation of write_token_ids()
     def insert_token(self, abs_index, token):
 
         # Insert the new token in the global tokens list
@@ -254,79 +270,17 @@ class AnnotatedDocument(object):
                 annotation.accomodate_inserted_token(*insertion_point)
 
 
-    #def validate_mention_tokens(self):
-
-    #    for coreference_id, coreference in self.coreferences.items():
-    #        if 'representative' in coreference:
-    #            rep = coreference['representative']
-    #            expected_text = rep['text']
-    #            found_text = self.get_mention_tokens(rep).text()
-
-    #            if not text_match_nowhite(expected_text, found_text):
-    #                raise ValueError(
-    #                    'Non-matching text in doc# %d, coreference# %d, '
-    #                    'mention# [rep]. Expected "%s", found "%s".'
-    #                    % (self.doc_id,coreference_id,expected_text,found_text)
-    #                )
-
-    #        for mention_id, mention in enumerate(coreference['mentions']):
-    #            expected_text = mention['text']
-    #            found_text = self.get_mention_tokens(mention).text()
-
-    #            if not text_match_nowhite(expected_text, found_text):
-    #                raise ValueError(
-    #                    'Non-matching text in doc# %d, coreference# %d, '
-    #                    'mention# %d. Expected "%s", found "%s".'
-    #                    % (
-    #                        self.doc_id,coreference_id,mention_id,
-    #                        expected_text,found_text
-    #                    )
-    #                )
-
-
-    #def fix_sentence_indices(self, abs_index):
-    #    for sentence in self.sentences:
-    #        sentence['token_span'] = self.fix_token_span(
-    #            abs_index, sentence['token_span'])
-
-
-    #def fix_mentions_tokens(self, abs_index, sentence_id):
-    #    for coreference in self.coreferences.values():
-    #        if 'representative' in coreference:
-    #            self.fix_mention_tokens(
-    #                abs_index, sentence_id, coreference['representative'])
-    #        for mention in coreference['mentions']:
-    #            self.fix_mention_tokens(abs_index, sentence_id, mention)
-
-
-    #def fix_token_span(self, abs_index, token_span):
-    #    return parc_reader.spans.TokenSpan([
-    #        (maybe_increment(start,abs_index), maybe_increment(stop,abs_index))
-    #        for start, stop in token_span
-    #    ])
-
-
-    #def fix_mention_tokens(self, abs_index, sentence_id, mention):
-    #    mention['token_span'] = self.fix_token_span(
-    #        abs_index, mention['token_span'])
-    #    if mention['sentence_id'] == sentence_id:
-    #        mention['tokens'] = self.get_mention_tokens(mention)
+    def write_relative_token_ids_in_sentence(self, sentence_id):
+        for token_id, token in enumerate(self.get_sentence_tokens(sentence_id)):
+            token['id'] = token_id
+            token['sentence_id'] = sentence_id
 
 
     def write_token_ids(self):
-        last_sentence_id = None
-        within_sentnece_token_id = 0
         for abs_id, token in enumerate(self.tokens):
-
-            sentence_id = token['sentence_id']
-            if sentence_id != last_sentence_id:
-                within_sentence_token_id = 0
-            else:
-                within_sentence_token_id += 1
-            last_sentence_id = sentence_id
-
             token['abs_id'] = abs_id
-            token['id'] = within_sentence_token_id
+        for sentence_id in range(len(self.sentences)):
+            self.write_relative_token_ids_in_sentence(sentence_id)
 
 
 
