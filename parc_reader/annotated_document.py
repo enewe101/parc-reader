@@ -194,7 +194,7 @@ class AnnotatedDocument(object):
             if self.doc_id == 63:
                 if self_token['abs_id'] == 291:
                     continue
-            
+
             force_same_token = False
             if self.doc_id == 2201:
                 if self_token['abs_id'] == 890:
@@ -220,6 +220,7 @@ class AnnotatedDocument(object):
                 self_token.update(t4k.select(other_token, copy_token_fields))
 
             elif self_text == other.tokens[other_token_pointer+1]['text']:
+                raise ValueError(self.doc_id, self_token_pointer, self_text)
                 continue
 
             else:

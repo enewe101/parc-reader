@@ -1,26 +1,109 @@
 from collections import defaultdict
 from unittest import main, TestCase
-from parc_reader.new_reader import ParcCorenlpReader, ROLES
-import parc_reader
+from pr.new_reader import ParcCorenlpReader, ROLES
+import pr as pr
 import t4k
 
 
 class TestReadAllAnnotations(TestCase):
 
     def test_read_all_annotations(self):
-        dataset = parc_reader.bnp_pronouns_reader.read_bnp_pronoun_dataset(
+        dataset = pr.bnp_pronouns_reader.read_bbn_pronoun_dataset(
             skip=0,limit=20)
         print len(dataset)
+
+
+class TestReadCoreferenceAnnotations(TestCase):
+
+    def setUp(self):
+       docs = pr.bnp_pronouns_reader.read_coreference_annotations(
+            limit=215) 
+       self.doc1 = docs[37]
+       self.doc2 = docs[214]
+
+
+    def test_read_coreference_annotations(self):
+
+        num_plain_mentions = 67
+        num_coreference_chains = 31
+        num_coreference_chains_without_representative = 1
+        num_mentions = (
+            num_plain_mentions
+            + num_coreference_chains 
+            - num_coreference_chains_without_representative
+        )
+
+        # Test that all the mentions and coreference chains exist
+        self.assertEqual(len(self.doc1.annotations['mentions']), num_mentions)
+        self.assertEqual(
+            len(self.doc1.annotations['coreferences']), num_coreference_chains)
+
+        # Test that all the mentions have the right text
+        for mention in self.doc1.annotations['mentions'].values():
+            self.assertEqual(
+                self.doc1.get_tokens(mention['token_span']).text(),
+                mention['text']
+            )
+
+        # Test that all the mentions are the right kind
+        for coref_id, coref in self.doc1.annotations['coreferences'].items():
+            for mention_id in coref['antecedents']:
+                mention = self.doc1.annotations['mentions'][mention_id]
+                self.assertEqual(mention['mention_type'], 'antecedent')
+                self.assertEqual(mention['coreference_id'], coref_id)
+            for mention_id in coref['pronouns']:
+                mention = self.doc1.annotations['mentions'][mention_id]
+                self.assertEqual(mention['mention_type'], 'pronoun')
+                self.assertEqual(mention['coreference_id'], coref_id)
+            if coref['representative'] is not None:
+                mention_id = coref['representative']
+                mention = self.doc1.annotations['mentions'][mention_id]
+                self.assertEqual(mention['mention_type'], 'representative')
+                self.assertEqual(mention['coreference_id'], coref_id)
+
+        # Find the coreference chain that lacks any representative mention
+        coreferences_without_representative = [
+            coref for coref in self.doc1.annotations['coreferences'].values()
+            if coref['representative'] is None
+        ]
+        self.assertEqual(
+            len(coreferences_without_representative), 
+            num_coreference_chains_without_representative
+        )
+
+        # Test that the representative for a coreference chain having two
+        # antecedents is correctly constructed
+        multi_antecedent_coref_id = 20
+        multi_antecedent_coref = self.doc1.annotations['coreferences'][
+            multi_antecedent_coref_id]
+        multi_antecedent_mention_id = multi_antecedent_coref['representative']
+        multi_antecedent_mention = self.doc1.annotations['mentions'][
+            multi_antecedent_mention_id]
+        representative_text = self.doc1.get_tokens(
+            multi_antecedent_mention['token_span']).text()
+        expected_representative_text = 'Katzenstein Akio Morita'
+        self.assertEqual(representative_text, expected_representative_text) 
+
+
+        # Test that the representative for a coreference chain having two
+        # antecedents is correctly constructed, when the antecedents are part
+        # of different sentences
+        multi_antecedent_coref = self.doc2.annotations['mentions'][4]
+        representative_text = self.doc2.get_tokens(
+            multi_antecedent_coref['token_span']).text()
+        expected_representative_text = 'Bert Campaneris Paul Blair Luis Tiant'
+        self.assertEqual(representative_text, expected_representative_text)
+
 
 
 class TestMergingPropbankVerbs(TestCase):
 
     def setUp(self):
         self.propbank_verbs_by_doc = (
-            parc_reader.bnp_pronouns_reader.read_propbank_verbs())
+            pr.bnp_pronouns_reader.read_propbank_verbs())
 
     def get_test_docs(self, doc_id):
-        parc_doc = parc_reader.parc_dataset.load_parc_doc(
+        parc_doc = pr.parc_dataset.load_parc_doc(
             doc_id, include_nested=False)
         propbank_verbs = self.propbank_verbs_by_doc[doc_id]
         return parc_doc, propbank_verbs
@@ -34,7 +117,7 @@ class TestMergingPropbankVerbs(TestCase):
     def do_test_one_doc_for_propbank_merging(self, doc_id):
 
         parc_doc, propbank_verbs = self.get_test_docs(doc_id)
-        parc_reader.bnp_pronouns_reader.merge_propbank_verbs(
+        pr.bnp_pronouns_reader.merge_propbank_verbs(
             parc_doc, propbank_verbs)
 
         for verb_id, (sentence_id,token_id,lemma) in enumerate(propbank_verbs):
@@ -60,58 +143,108 @@ class TestTokenSpan(TestCase):
 
     def test_bad_span(self):
         with self.assertRaises(ValueError):
-            parc_reader.spans.TokenSpan([(0, 0, 0)])
+            pr.spans.TokenSpan([(0, 0, 0)])
         with self.assertRaises(ValueError):
-            parc_reader.spans.TokenSpan([(0, 1, 0)])
+            pr.spans.TokenSpan([(0, 1, 0)])
         with self.assertRaises(ValueError):
-            parc_reader.spans.TokenSpan(single_range=(0, 0, 0))
+            pr.spans.TokenSpan(single_range=(0, 0, 0))
         with self.assertRaises(ValueError):
-            parc_reader.spans.TokenSpan(single_range=(0, 1, 0))
+            pr.spans.TokenSpan(single_range=(0, 1, 0))
         with self.assertRaises(ValueError):
-            parc_reader.spans.TokenSpan([(0, 1, 0)], absolute=True)
+            pr.spans.TokenSpan([(0, 1, 0)], absolute=True)
         with self.assertRaises(ValueError):
-            parc_reader.spans.TokenSpan([(None, 1, 0)])
+            pr.spans.TokenSpan([(None, 1, 0)])
         with self.assertRaises(ValueError):
-            parc_reader.spans.TokenSpan(single_range=(0,1))
+            pr.spans.TokenSpan(single_range=(0,1))
 
 
     def test_consolidation(self):
 
         # Consolidation when one span is adjacent to another
-        t1 = parc_reader.spans.TokenSpan([(0,0,1), (0,1,2)])
-        t2 = parc_reader.spans.TokenSpan([(0,0,2)])
+        t1 = pr.spans.TokenSpan([(0,0,1), (0,1,2)])
+        t2 = pr.spans.TokenSpan([(0,0,2)])
         self.assertEqual(t1, t2)
 
         # Consolidating when one span subsumes another
-        t1 = parc_reader.spans.TokenSpan([(0,0,2), (0,1,3)])
-        t2 = parc_reader.spans.TokenSpan([(0,0,3)])
+        t1 = pr.spans.TokenSpan([(0,0,2), (0,1,3)])
+        t2 = pr.spans.TokenSpan([(0,0,3)])
         self.assertEqual(t1, t2)
 
         # Consolidation of unordered ranges works, and equality is maintained.
-        t1 = parc_reader.spans.TokenSpan([(0,1,2), (0,0,1)])
-        t2 = parc_reader.spans.TokenSpan([(0,0,2)])
+        t1 = pr.spans.TokenSpan([(0,1,2), (0,0,1)])
+        t2 = pr.spans.TokenSpan([(0,0,2)])
         self.assertEqual(t1, t2)
 
         # Equality is not affected by order.
-        t1 = parc_reader.spans.TokenSpan([(0,2,3), (0,0,1)])
-        t2 = parc_reader.spans.TokenSpan([(0,0,1), (0,2,3)])
+        t1 = pr.spans.TokenSpan([(0,2,3), (0,0,1)])
+        t2 = pr.spans.TokenSpan([(0,0,1), (0,2,3)])
         self.assertEqual(t1, t2)
 
 
     def test_good_span(self):
-        parc_reader.spans.TokenSpan(single_range=(0,0,1))
-        parc_reader.spans.TokenSpan(single_range=(0,1), absolute=True)
-        parc_reader.spans.TokenSpan(single_range=(None,0,1), absolute=True)
+        pr.spans.TokenSpan(single_range=(0,0,1))
+        pr.spans.TokenSpan(single_range=(0,1), absolute=True)
+        pr.spans.TokenSpan(single_range=(None,0,1), absolute=True)
 
 
     def test_len(self):
-        empty_span = parc_reader.spans.TokenSpan()
+        empty_span = pr.spans.TokenSpan()
         self.assertEqual(len(empty_span), 0)
-        span_with_overlaps = parc_reader.spans.TokenSpan(
+        span_with_overlaps = pr.spans.TokenSpan(
             [(0,3), (1,4)], absolute=True)
         self.assertEqual(len(span_with_overlaps), 4)
 
 
+
+class TestReadEntityTypes(TestCase):
+
+    def setUp(self):
+        self.doc = pr.bnp_pronouns_reader.read_bbn_entity_types(
+            limit=4
+        )[3]
+
+
+    def test_read_entity_types(self):
+        expected_num_entities = 138
+        self.assertEqual(
+            len(self.doc.annotations['entities']), expected_num_entities)
+
+        # Test first entity
+        entity = self.doc.annotations['entities'][0]
+        self.entity_test(
+            entity,  'asbestos', ('ENAMEX', 'SUBSTANCE', 'CHEMICAL'))
+
+        # Test last entity
+        entity = self.doc.annotations['entities'][137]
+        self.entity_test(entity, 'today', ('TIMEX', 'DATE', 'DATE'))
+
+
+    def entity_test(self, entity, expected_text, expected_type):
+        found_text1 = self.doc.get_tokens_abs(entity['token_span']).text()
+        found_text2 = entity['text']
+        self.assertEqual(found_text1, expected_text)
+        self.assertEqual(found_text2, expected_text)
+        self.assertEqual(entity['entity_type'], expected_type)
+
+
+
+class TestEntityCorefMerging(TestCase):
+
+    def setUp(self):
+        self.merged = pr.bnp_prounouns_reader.read_coreference_annotations(
+            skip=3, limit=4)[3]
+        self.entity_doc = pr.bnp_pronouns_reader.read_bbn_entity_types(
+            limit=4)[3]
+        self.merged.merge_tokens(
+            self.entity_doc,
+            copy_token_fields=['entity'],
+            copy_annotations=['entities'],
+            verbose=True
+        )
+
+
+    def test_entity_coref_merging(self):
+        pass
 
 
 class TestReadParcFile(TestCase):
@@ -124,9 +257,9 @@ class TestReadParcFile(TestCase):
 
     def get_test_doc(self, include_nested=True):
         first_interesting_article = 3
-        path = parc_reader.parc_dataset.get_parc_path(first_interesting_article)
+        path = pr.parc_dataset.get_parc_path(first_interesting_article)
         xml = open(path).read()
-        return parc_reader.new_parc_annotated_text.read_parc_file(
+        return pr.new_parc_annotated_text.read_parc_file(
             xml, include_nested=include_nested)
 
 
@@ -250,7 +383,7 @@ class TestReadParcFile(TestCase):
         found_dfs_sequence = [
             (depth, node['constituent_type']) 
             for depth, node in 
-            parc_reader.spans.get_dfs_constituents(constituent)
+            pr.spans.get_dfs_constituents(constituent)
         ]
         expected_dfs_sequence = [
             (0, u's'), (1, u's-tpc-1'), (2, u'np-sbj'), (3, u'np'), (4, u'np'),
@@ -279,7 +412,7 @@ class TestReadParcFile(TestCase):
         that all other constituents have been converted to sentence-relative 
         addressing.
         """
-        
+
         # Choose anything except the first sentence.  We need to make sure that 
         # the constituents' token_spans are addressed relative to the start of
         # the sentence
@@ -295,7 +428,7 @@ class TestReadParcFile(TestCase):
         
         # Now check that all other constituents have correct sentence-relative
         # token spans
-        nodes_in_dfs_order = parc_reader.spans.get_dfs_constituents(
+        nodes_in_dfs_order = pr.spans.get_dfs_constituents(
             self.doc.sentences[TEST_SENTENCE_INDEX])
 
         max_end = t4k.Max()
@@ -321,7 +454,7 @@ class TestReadParcFile(TestCase):
             if not past_first_token:
                 self.assertEqual(start, 0)
 
-            for child in parc_reader.spans.get_constituency_children(node):
+            for child in pr.spans.get_constituency_children(node):
                 self.assertEqual(len(child['token_span']), 1)
                 token_span = child['token_span'][0]
                 child_sentence_id, child_start, child_end = token_span

@@ -245,8 +245,9 @@ class TokenSpan(list):
                 last_start = start
 
             elif sentence_id == last_sentence and start <= last_end:
-                current_range = (sentence_id, last_start, end)
-                last_end = end
+                if end > last_end:
+                    current_range = (sentence_id, last_start, end)
+                    last_end = end
 
             else:
                 new_span.append(current_range)
@@ -347,5 +348,11 @@ class TokenSpan(list):
     #        choose_from_tokens = sentence_list[sentence_id].tokens()
     #        selected.extend(choose_from_tokens[start:end])
     #    return parc_reader.token_list.TokenList(selected)
+
+
+
+class Coreference(dict):
+    def accomodate_inserted_token(self, *insertion_point):
+        pass
 
 

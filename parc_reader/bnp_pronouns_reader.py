@@ -16,6 +16,7 @@ BBN_ENTITY_TYPES_DIR = os.path.join(
 PROPBANK_PATH = os.path.join(
     parc_reader.SETTINGS.PROPBANK_DIR, 'data', 'vloc.txt')
 
+
 def read_bnp_pronoun_dataset(
     subset='all',
     skip=None,
@@ -266,13 +267,11 @@ def make_coreference_annotated_text(
     mentions,
     doc_id
 ):
-
     annotated_doc = parc_reader.annotated_document.AnnotatedDocument(
         tokens, sentences, 
         {'coreferences':coreferences, 'mentions': mentions},
         doc_id=doc_id
     )
-
     # Link tokens to any mentions in which they participate
     for mention_id, mention in mentions.items():
         for token in annotated_doc.get_tokens(mention['token_span']):
@@ -280,18 +279,21 @@ def make_coreference_annotated_text(
                 token['mentions'].append(mention['id'])
             except KeyError:
                 token['mentions'] = [mention['id']]
-
         verify_mention_tokens(mention, annotated_doc)
-
     return annotated_doc
 
 
+SKIP_MENTION_VERIFICATION = {(2343, 28), (2343, 59), (2362, 16)}
 def verify_mention_tokens(mention, doc):
     expected_text = mention['text']
     found_text = doc.get_tokens(mention['token_span']).text()
-    assert_text_match(expected_text, found_text)
 
-
+    # This document has two antecedents that overlap, causing an inability
+    # to verify the tokens by comparing to concatenated antecedent texts.
+    if (doc.doc_id, mention['id']) in SKIP_MENTION_VERIFICATION:
+        pass
+    else:
+        assert_text_match(doc.doc_id, mention['id'], expected_text, found_text)
 
 
 def read_bbn_entity_types(entity_types_path=BBN_ENTITY_TYPES_DIR, limit=None):
@@ -561,7 +563,6 @@ def read_coreference_information_from_disk(path=BNP_PRONOUNS_PATH, limit=None):
     return annotations_by_doc
 
 
-
 def assemble_all_coreference_annotations(parsed_docs):
     return {
         doc_id : assemble_doc_coreference_annotations(coreference_specs)
@@ -582,14 +583,23 @@ def assemble_doc_coreference_annotations(coreference_specs):
     for coreference_spec in coreference_specs:
 
         coreference_id = len(coreferences)
-        coreference = Coreference({
-            'id': coreference_id,
+        coreference = parc_reader.spans.Coreference({
             'pronouns': [],
             'antecedents': [],
         })
         coreferences[coreference_id] = coreference
 
+        seen_mention_signatures = set()
+
         for mention in coreference_spec:
+
+            # There is at least one instance of duplicated mentions in the 
+            # bbn-pcet pronoun dataset
+            if mention['token_span'][0] in seen_mention_signatures:
+                continue
+            else:
+                seen_mention_signatures.add(mention['token_span'][0])
+
             mention_id = len(mentions)
             mention['id'] = mention_id
             mention['coreference_id'] = coreference_id
@@ -614,11 +624,6 @@ def assemble_doc_coreference_annotations(coreference_specs):
     return coreferences, mentions
 
 
-class Coreference(dict):
-    def accomodate_inserted_token(self, *insertion_point):
-        pass
-
-
 def accumulate_representative(mentions, antecedent_ids):
     """
     merges together multiple antecedents into one representative mention.
@@ -640,14 +645,15 @@ def accumulate_representative(mentions, antecedent_ids):
 
 
 
-def assert_text_match(expected_text, found_text):
+def assert_text_match(doc_id, mention_id, expected_text, found_text):
+    if doc_id is None:
+        doc_id = -1
     if not text_match_nowhite(expected_text, found_text):
         raise ValueError(
-            'While adding a mention within a coreference chains for file %d, '
+            'While adding a mention %d in file %d, '
             'the tokens found for the mention did not match the '
-            'Expected text.  '
-            'expected "%s", but found "%s"'
-            % (expected_text, found_text)
+            'expected text.  Expected "%s", but found "%s"'
+            % (mention_id, doc_id, expected_text, found_text)
         )
 
 
