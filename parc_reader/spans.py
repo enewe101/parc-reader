@@ -8,11 +8,8 @@ class Span(dict):
     """
 
     def __init__(self, template=None, absolute=False, **kwargs):
-
         template = template or {}
-
         super(Span, self).__init__(template, **kwargs)
-
         self.initialize_tokens(absolute)
 
 
@@ -29,8 +26,8 @@ class Span(dict):
         self['token_span'].add_token_range(token_range)
 
 
-    def accomodate_inserted_token(self, abs_id, sentence_id, rel_id):
-        self['token_span'].accomodate_inserted_token(abs_id,sentence_id,rel_id)
+    def accomodate_inserted_token(self, sentence_id, index):
+        self['token_span'].accomodate_inserted_token(sentence_id, index)
 
 
     def relativize(self, doc):
@@ -46,12 +43,11 @@ class Constituency(Span):
             self['constituent_children'] = []
 
 
-    def accomodate_inserted_token(self, abs_id, sentence_id, rel_id):
-        super(Constituency, self).accomodate_inserted_token(
-            abs_id, sentence_id, rel_id)
+    def accomodate_inserted_token(self, sentence_id, index):
+        super(Constituency, self).accomodate_inserted_token(sentence_id, index)
 
         for child in self['constituent_children']:
-            child.accomodate_inserted_token(abs_id, sentence_id, rel_id)
+            child.accomodate_inserted_token(sentence_id, index)
 
 
     def relativize(self, doc):
@@ -96,10 +92,9 @@ class Attribution(dict):
             span = self.pop(span_type, [])
             self[span_type] = TokenSpan(span, absolute=absolute)
 
-    def accomodate_inserted_token(self, abs_id, sentence_id, rel_id):
+    def accomodate_inserted_token(self, sentence_id, index):
         for span_type in self.ROLES:
-            self[span_type].accomodate_inserted_token(
-                abs_id, sentence_id, rel_id)
+            self[span_type].accomodate_inserted_token(sentence_id, index)
 
     def relativize(self, doc):
         for span_type in self.ROLES:
@@ -296,35 +291,35 @@ class TokenSpan(list):
         return self[0]
 
 
-    def accomodate_inserted_token(
-        self,
-        at_abs_id,
-        at_sentence_id=None,
-        at_rel_id=None
-    ):
-
-        insertion_point = (at_abs_id, at_sentence_id, at_rel_id)
-
-        # Replace range elements in place
+    def accomodate_inserted_token(self, sentence_id, index):
         self.replace_with([
-            self.maybe_shift_range(token_range, insertion_point) 
+            self.maybe_shift_range(token_range, sentence_id, index) 
             for token_range in self
         ])
 
 
-    def maybe_shift_range(self, token_range, insertion_point):
+    def maybe_shift_range(self, token_range, at_sentence_id, at_index):
 
         sentence_id, start, end = token_range
-        at_abs_id, at_sentence_id, at_rel_id = insertion_point
 
-        if sentence_id is None:
-            start += int(start >= at_abs_id)
-            end += int(end >= at_abs_id)
+        if self.absolute:
+            if at_sentence_id is not None:
+                raise ValueError(
+                    'This span is absolute but token position was given in '
+                    'sentence-relative form.'
+                )
+            start += int(start > at_index)
+            end += int(end >= at_index)
             return (None, start, end)
 
         else:
-            start += int((sentence_id, start) >= (at_sentence_id, at_rel_id))
-            end += int((sentence_id, end) >= (at_sentence_id, at_rel_id))
+            if at_sentence_id is None:
+                raise ValueError(
+                    'This span is relative but token position was given in '
+                    'absolute form.'
+                )
+            start += int((sentence_id, start) > (at_sentence_id, at_index))
+            end += int((sentence_id, end) >= (at_sentence_id, at_index))
             return (sentence_id, start, end)
 
 
@@ -352,7 +347,7 @@ class TokenSpan(list):
 
 
 class Coreference(dict):
-    def accomodate_inserted_token(self, *insertion_point):
+    def accomodate_inserted_token(self, sentence_id, index):
         pass
 
 

@@ -1,7 +1,7 @@
 from collections import defaultdict
 from unittest import main, TestCase
-from pr.new_reader import ParcCorenlpReader, ROLES
-import pr as pr
+import parc_reader as pr
+from parc_reader.new_reader import ParcCorenlpReader, ROLES
 import t4k
 
 
@@ -11,6 +11,47 @@ class TestReadAllAnnotations(TestCase):
         dataset = pr.bnp_pronouns_reader.read_bbn_pronoun_dataset(
             skip=0,limit=20)
         print len(dataset)
+
+
+
+
+def make_dummy_doc():
+    tokens = [
+        {'text':text} for text in 
+        ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight']
+    ]
+    sentence_spans = [(0,4), (4,9)]
+    sentences = [
+        pr.spans.Span({
+            'id': sentence_id,
+            'token_span': [(None, start, end)]
+        }, absolute=True)
+        for sentence_id, (start, end) in enumerate(sentence_spans)
+    ]
+    return pr.annotated_document.AnnotatedDocument(
+        tokens=tokens, sentences=sentences)
+
+
+class TestAnnotatedDocument(TestCase):
+
+    def make_dummy_docu(self):
+        tokens = [{'text':c} for c in 'abcdefgh']
+
+        sentence_spans = [(0,4), (4,9)]
+        sentences = [
+            pr.spans.Span({
+                'id': sentence_id,
+                'token_span': [(None, start, end)]
+            }, absolute=True)
+            for sentence_id, (start, end) in enumerate(sentence_spans)
+        ]
+        self.doc = pr.annotated_document.AnnotatedDocument(
+            tokens=tokens, sentences=sentences)
+
+
+    def test_token_insertion(self):
+        pass
+
 
 
 class TestReadCoreferenceAnnotations(TestCase):
@@ -194,6 +235,23 @@ class TestTokenSpan(TestCase):
             [(0,3), (1,4)], absolute=True)
         self.assertEqual(len(span_with_overlaps), 4)
 
+
+    def test_accomodate_inserted_token(self):
+
+        # Test inserting token at the beginning of absolute range.
+        span = pr.spans.TokenSpan([(None,0,4), (None,4,8)])
+        span.accomodate_inserted_token(None,4)
+        self.assertEqual(span, pr.spans.TokenSpan([(0,0,4), (1,4,9)]))
+
+        # Test inserting token at the end of a range.
+        span = pr.spans.TokenSpan([(0,0,4), (1,4,8)])
+        span.accomodate_inserted_token(0,4)
+        self.assertEqual(span, pr.spans.TokenSpan([(0,0,5), (1,5,9)]))
+
+        # Test inserting token at the beginning of a range.
+        span = pr.spans.TokenSpan([(0,0,4), (1,4,8)])
+        span.accomodate_inserted_token(1,4)
+        self.assertEqual(span, pr.spans.TokenSpan([(0,0,4), (1,4,9)]))
 
 
 class TestReadEntityTypes(TestCase):

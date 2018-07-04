@@ -3,6 +3,13 @@ import parc_reader
 import t4k
 
 
+# TODO: provide a guarantee that tokens always have
+# abs_id that is int
+# sentence_id that can be None
+# id that can be None
+
+# TODO: convert all token addressing to absolute
+
 class AnnotatedDocument(object):
 
     def __init__(self,
@@ -12,6 +19,7 @@ class AnnotatedDocument(object):
         doc_id=None,
     ):
 
+        # We should guarantee that tokens have an absolute id
         self.doc_id = doc_id
         self.annotations = annotations or {}
         self.tokens = parc_reader.token_list.TokenList(tokens or [])
@@ -173,6 +181,12 @@ class AnnotatedDocument(object):
         verbose=False
     ):
 
+        # TODO: For every token mismatch, we need to update the local
+        # annotation spans or the remote ones.  We need to maintain the
+        # distinction between local and remote annotations, so we should delay
+        # copying over the annotations until after token-wise mergin is
+        # finished.
+
         # Copy over annotations
         for annotation in copy_annotations:
             self.annotations[annotation] = other.annotations[annotation]
@@ -184,7 +198,10 @@ class AnnotatedDocument(object):
                 self_token = self.tokens[self_token_pointer]
             except IndexError:
                 if other_token['text'] == '.':
+
+                    # TODO delete token in other
                     continue
+
                 raise
 
             self_text, other_text = self_token['text'], other_token['text']
@@ -193,6 +210,8 @@ class AnnotatedDocument(object):
             # Skip the stray apostraphe in doc 63.
             if self.doc_id == 63:
                 if self_token['abs_id'] == 291:
+
+                    # TODO delete token in other
                     continue
 
             force_same_token = False
@@ -216,6 +235,8 @@ class AnnotatedDocument(object):
                         prefix, postfix
                     )
                 )
+
+                # SPLITTING LOCAL TOKEN
                 self_token, remainder = self.split_token(self_token, other_text)
                 self_token.update(t4k.select(other_token, copy_token_fields))
 
@@ -233,26 +254,21 @@ class AnnotatedDocument(object):
 
 
     def split_token(self, token, partial_text):
-
-        abs_index = token['abs_id'] + 1
-
         prefix, postfix = match_split(token['text'], partial_text)
-
         token['text'] = partial_text
         remainder_token = dict(token, text=postfix)
-        self.insert_token(abs_index, remainder_token)
-
+        self.insert_token_after(token['abs_id'], remainder_token)
         return token, remainder_token
 
 
-    # TODO: alter this to use the new implementation of write_token_ids()
-    def insert_token(self, abs_index, token):
-
-        # Insert the new token in the global tokens list
-        self.tokens.insert(abs_index, token)
-
-        # Rewrite all the token ids to restore unique compact incrementing ids
+    def delete_token(self, abs_index, token):
+        deleted_token = self.tokens.pop(abs_index)
         self.write_token_ids()
+
+        # 1) Remove the token from the token list
+        # 2) Adjust the token's own abs and rel id
+        # 3) Adjust the span limits for sentences
+        # 4) Adjust the span limits for annotations
 
         insertion_point = [
             abs_index,
@@ -260,7 +276,7 @@ class AnnotatedDocument(object):
             token.get('id', None)
         ]
 
-        # Posibly adjust sentences
+        # Possibly adjust sentences
         if self.sentences:
             for sentence in self.sentences:
                 sentence.accomodate_inserted_token(*insertion_point)
@@ -269,6 +285,24 @@ class AnnotatedDocument(object):
         for annotation_type in self.annotations:
             for annotation in self.annotations[annotation_type].values():
                 annotation.accomodate_inserted_token(*insertion_point)
+
+
+
+    def insert_token_after(self, token, abs_index):
+
+        # Adjust the sentence boundaries
+        for sentence in self.sentences:
+            sentence.accomodate_inserted_token(abs_index)
+
+        # Adjust the annotations
+        for annotation_type in self.annotations:
+            for annotation in self.annotations[annotation_type].values():
+                annotation.accomodate_inserted_token(abs_index)
+        
+        # Insert the new token in the global tokens list, and rewrite tokens'
+        # own addresses
+        self.tokens.insert(index, token)
+        self.write_token_ids()
 
 
     def write_relative_token_ids_in_sentence(self, sentence_id):
