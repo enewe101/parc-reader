@@ -110,35 +110,22 @@ class Attribution(dict):
 class TokenSpan(list):
     """
     Serves as a pointer to a specific subset of tokens in a document.
-
-    Consists of a list of tuples, having the form 
-
-        (sentence_id, start, end)
-
-    Absolute token_spans address tokens with respect to their ordering in the
-    entire document, and have a sentence_id of `None`.  Relative token spans
-    address tokens relative to a given sentence, and should have an integer for
-    sentence_id 
-
-    In either case, the start and end indices follow the convention of slice
-    notation.
+    Consists of a list of tuples, having the form (start, end).
+    The start and end indices follow the convention of slice notation, so the
+    end'th token is not included but the start'th is.
     """
 
-    def __init__(
-        self, token_span=None, single_range=None, absolute=False
-    ):
+    def __init__(self, token_span=None):
         super(TokenSpan, self).__init__()
-        self.absolute = absolute
 
         # Collect together spans to be added.  Tolerate adding no spans, and
         # tolerate specifying single_range and / or token_span.
         token_span = [] if token_span is None else list(token_span)
-        if single_range is not None:
-            token_span.append(single_range)
 
         # Add all the tokens
         self.consolidated = True
-        self.add_token_ranges(token_span)
+        self.max = None
+        self.extend(token_span)
 
 
     def relativize(self, doc):
@@ -165,61 +152,23 @@ class TokenSpan(list):
         self.replace_with(new_span)
 
 
-    def add_token_ranges(self, token_ranges):
+    def extend(self, token_ranges):
         for token_range in token_ranges:
-            self.add_token_range(token_range, skip_consolidation=True)
-        self.consolidate()
+            self.append(token_range)
 
 
-    def _normalize_range(self, token_range):
-        """Handle ommitting sentence_id when specifying a token range."""
-        if len(token_range) == 3:
-            return token_range
-        elif len(token_range) == 2 and self.absolute:
+    def append(self, token_range):
+        try:
             start, end = token_range
-            return None, start, end
-        else:
-            raise ValueError(
-                "Token ranges must take the form `(start_index, end_index)` or "
-                "`(sentence_id, start_index, end_index)`.  Got %s."
-                % str(token_range)
-            )
+        except ValueError:
+            print token_range
 
-
-    def _validate_range(self, token_range):
-        sentence_id, start, end = token_range
-        if self.absolute and sentence_id is not None:
-            raise ValueError(
-                'Absolute token ranges should have sentence_id = None.')
-        if not self.absolute and sentence_id is None:
-            raise ValueError(
-                'Relative token ranges must have an integer sentence_id.')
-        if start >= end:
-            raise ValueError(
-                "The start index of the token range must be less "
-                "than the end index"
-            )
-
-
-    def add_token_range(self, token_range, skip_consolidation=False):
-        token_range = self._normalize_range(token_range)
-        self._validate_range(token_range)
-        self._check_if_still_consolidated(token_range)
+        if start >= end or start < 0:
+            raise ValueError('Invalid range: %d, %d.' % (start, end))
+        if self.max >= start: 
+            self.consolidated = False
+        self.max = max(self.max, end)
         super(TokenSpan, self).append(token_range)
-        if not skip_consolidation:
-            self.consolidate()
-
-
-    def _check_if_still_consolidated(self, token_range):
-        """
-        Check if this token range comes strictly after existing token ranges,
-        in which case consolidation isn't needed.
-        """
-        sentence_id, start, end = token_range
-        if self.num_segments() > 0:
-            last_range_end = self[-1][2]
-            if last_range_end >= start:
-                self.consolidated = False
 
 
     def consolidate(self):
@@ -230,24 +179,21 @@ class TokenSpan(list):
         current_range = None
         last_end = None
         last_start = None
-        last_sentence = None
-        for sentence_id, start, end in self:
+        for start, end in self:
 
             if current_range is None:
-                current_range = (sentence_id, start, end)
-                last_sentence = sentence_id
+                current_range = (start, end)
                 last_end = end
                 last_start = start
 
-            elif sentence_id == last_sentence and start <= last_end:
+            elif start <= last_end:
                 if end > last_end:
-                    current_range = (sentence_id, last_start, end)
+                    current_range = (last_start, end)
                     last_end = end
 
             else:
                 new_span.append(current_range)
-                current_range = (sentence_id, start, end)
-                last_sentence = sentence_id
+                current_range = (start, end)
                 last_end = end
                 last_start = start
 
@@ -256,6 +202,7 @@ class TokenSpan(list):
 
         # Replace elements in place
         self._replace_with_consolidated(new_span)
+        self.consolidated = True
 
 
     def _replace_with_consolidated(self, token_ranges):
@@ -266,14 +213,13 @@ class TokenSpan(list):
         self[:] = token_ranges
 
 
-    def replace_with(self, token_ranges, absolute=None):
+    def replace_with(self, token_ranges):
         """
         Assign new token ranges.  Subject ranges to validation and
         consolidation.
         """
-        self.absolute = self.absolute if absolute is None else absolute
         self[:] = []
-        self.add_token_ranges(token_ranges)
+        self.extend(token_ranges)
 
 
     def num_segments(self):
@@ -291,58 +237,22 @@ class TokenSpan(list):
         return self[0]
 
 
-    def accomodate_inserted_token(self, sentence_id, index):
+    def accomodate_inserted_token(self, idx):
         self.replace_with([
-            self.maybe_shift_range(token_range, sentence_id, index) 
-            for token_range in self
+            (start+int(start>=idx), end+int(end>=idx)) 
+            for start, end in self
         ])
 
 
-    def maybe_shift_range(self, token_range, at_sentence_id, at_index):
-
-        sentence_id, start, end = token_range
-
-        if self.absolute:
-            if at_sentence_id is not None:
-                raise ValueError(
-                    'This span is absolute but token position was given in '
-                    'sentence-relative form.'
-                )
-            start += int(start > at_index)
-            end += int(end >= at_index)
-            return (None, start, end)
-
-        else:
-            if at_sentence_id is None:
-                raise ValueError(
-                    'This span is relative but token position was given in '
-                    'absolute form.'
-                )
-            start += int((sentence_id, start) > (at_sentence_id, at_index))
-            end += int((sentence_id, end) >= (at_sentence_id, at_index))
-            return (sentence_id, start, end)
+    def envelope(self):
+        self.consolidate()
+        return self[0][0], self[-1][1]
 
 
     def __len__(self):
-        return sum([end-start for _, start, end in self])
+        self.consolidate()
+        return sum([end - start for start, end in self])
 
-
-    #def extend(self, iterable):
-    #    super(TokenSpan, self).extend(iterable)
-    #    self.sort()
-
-
-    #def get_tokens(self, sentence_list):
-    #    selected = []
-    #    for sentence_id, start, end in self:
-    #        if sentence_id is None:
-    #            raise ValueError(
-    #                'This token span does not have any sentence information. '
-    #                'Tokens are addressed by absolute number'
-    #            )
-    #        choose_from_tokens = sentence_list[sentence_id].tokens()
-    #        selected.extend(choose_from_tokens[start:end])
-    #    return parc_reader.token_list.TokenList(selected)
 
 
 

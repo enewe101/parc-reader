@@ -13,8 +13,6 @@ class TestReadAllAnnotations(TestCase):
         print len(dataset)
 
 
-
-
 def make_dummy_doc():
     tokens = [
         {'text':text} for text in 
@@ -184,74 +182,72 @@ class TestTokenSpan(TestCase):
 
     def test_bad_span(self):
         with self.assertRaises(ValueError):
-            pr.spans.TokenSpan([(0, 0, 0)])
+            pr.spans.TokenSpan([(0, 0)])
         with self.assertRaises(ValueError):
-            pr.spans.TokenSpan([(0, 1, 0)])
+            pr.spans.TokenSpan([(1, 0)])
         with self.assertRaises(ValueError):
-            pr.spans.TokenSpan(single_range=(0, 0, 0))
-        with self.assertRaises(ValueError):
-            pr.spans.TokenSpan(single_range=(0, 1, 0))
-        with self.assertRaises(ValueError):
-            pr.spans.TokenSpan([(0, 1, 0)], absolute=True)
-        with self.assertRaises(ValueError):
-            pr.spans.TokenSpan([(None, 1, 0)])
-        with self.assertRaises(ValueError):
-            pr.spans.TokenSpan(single_range=(0,1))
+            pr.spans.TokenSpan([(-1, 1)])
 
 
     def test_consolidation(self):
 
         # Consolidation when one span is adjacent to another
-        t1 = pr.spans.TokenSpan([(0,0,1), (0,1,2)])
-        t2 = pr.spans.TokenSpan([(0,0,2)])
+        t1 = pr.spans.TokenSpan([(0,1), (1,2)])
+        t1.consolidate()
+        t2 = pr.spans.TokenSpan([(0,2)])
         self.assertEqual(t1, t2)
 
         # Consolidating when one span subsumes another
-        t1 = pr.spans.TokenSpan([(0,0,2), (0,1,3)])
-        t2 = pr.spans.TokenSpan([(0,0,3)])
+        t1 = pr.spans.TokenSpan([(0,2), (1,3)])
+        t1.consolidate()
+        t2 = pr.spans.TokenSpan([(0,3)])
         self.assertEqual(t1, t2)
 
         # Consolidation of unordered ranges works, and equality is maintained.
-        t1 = pr.spans.TokenSpan([(0,1,2), (0,0,1)])
-        t2 = pr.spans.TokenSpan([(0,0,2)])
+        t1 = pr.spans.TokenSpan([(1,2), (0,1)])
+        t1.consolidate()
+        t2 = pr.spans.TokenSpan([(0,2)])
         self.assertEqual(t1, t2)
 
         # Equality is not affected by order.
-        t1 = pr.spans.TokenSpan([(0,2,3), (0,0,1)])
-        t2 = pr.spans.TokenSpan([(0,0,1), (0,2,3)])
+        t1 = pr.spans.TokenSpan([(2,3), (0,1)])
+        t1.consolidate()
+        t2 = pr.spans.TokenSpan([(0,1), (2,3)])
         self.assertEqual(t1, t2)
 
 
     def test_good_span(self):
-        pr.spans.TokenSpan(single_range=(0,0,1))
-        pr.spans.TokenSpan(single_range=(0,1), absolute=True)
-        pr.spans.TokenSpan(single_range=(None,0,1), absolute=True)
+        pr.spans.TokenSpan([(0,1)])
 
 
     def test_len(self):
         empty_span = pr.spans.TokenSpan()
         self.assertEqual(len(empty_span), 0)
-        span_with_overlaps = pr.spans.TokenSpan(
-            [(0,3), (1,4)], absolute=True)
+        span_with_overlaps = pr.spans.TokenSpan([(0,3), (1,4)])
         self.assertEqual(len(span_with_overlaps), 4)
 
 
     def test_accomodate_inserted_token(self):
 
-        # Test inserting token at the beginning of absolute range.
-        span = pr.spans.TokenSpan([(None,0,4), (None,4,8)])
-        span.accomodate_inserted_token(None,4)
-        self.assertEqual(span, pr.spans.TokenSpan([(0,0,4), (1,4,9)]))
+        # Test inserting token at the beginning of a range.
+        span = pr.spans.TokenSpan([(0,4), (4,8)])
+        span.accomodate_inserted_token(0)
+        self.assertEqual(span, pr.spans.TokenSpan([(1,5), (5,9)]))
 
         # Test inserting token at the end of a range.
-        span = pr.spans.TokenSpan([(0,0,4), (1,4,8)])
-        span.accomodate_inserted_token(0,4)
-        self.assertEqual(span, pr.spans.TokenSpan([(0,0,5), (1,5,9)]))
+        span = pr.spans.TokenSpan([(0,4), (4,8)])
+        span.accomodate_inserted_token(8)
+        self.assertEqual(span, pr.spans.TokenSpan([(0,4), (4,9)]))
 
-        # Test inserting token at the beginning of a range.
-        span = pr.spans.TokenSpan([(0,0,4), (1,4,8)])
-        span.accomodate_inserted_token(1,4)
-        self.assertEqual(span, pr.spans.TokenSpan([(0,0,4), (1,4,9)]))
+        # Test inserting token inside a range
+        span = pr.spans.TokenSpan([(0,4), (4,8)])
+        span.accomodate_inserted_token(3)
+        self.assertEqual(span, pr.spans.TokenSpan([(0,5), (5,9)]))
+
+        # Test inserting token at boundary of adjacent ranges
+        span = pr.spans.TokenSpan([(0,4), (4,8)])
+        span.accomodate_inserted_token(4)
+        self.assertEqual(span, pr.spans.TokenSpan([(0,5), (5,9)]))
 
 
 class TestReadEntityTypes(TestCase):
